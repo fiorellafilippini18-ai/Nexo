@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="claro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexo</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-box" id="f">
+    <div class="logo" id="marcaLogo">N</div>
+    <h1 id="marcaT">Nexo</h1>
+    <p class="sub"><span id="marcaS">Desempeño &amp; resultados</span><br>Ingresá con el usuario que te dieron.</p>
+    <div id="err" class="aviso err oculto"></div>
+    <div style="margin-bottom:14px">
+      <label class="f" for="usuario">Usuario</label>
+      <input id="usuario" name="usuario" autocomplete="username" autocapitalize="none" required>
+    </div>
+    <div style="margin-bottom:20px">
+      <label class="f" for="clave">Contraseña</label>
+      <input id="clave" name="clave" type="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn primary block" type="submit" id="btn">Ingresar</button>
+  </form>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+fetch('/api/marca').then(r => r.json()).then((m) => {
+  if (m.paleta === 'rosa') document.documentElement.setAttribute('data-palette', 'rosa');
+  document.title = `${m.marca} — ${m.lema}`;
+  $('#marcaT').textContent = m.marca;
+  $('#marcaS').textContent = m.lema;
+  $('#marcaLogo').textContent = m.marca.slice(0, 1).toUpperCase();
+}).catch(() => {});
+
+const f = document.getElementById('f'), err = document.getElementById('err'), btn = document.getElementById('btn');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.classList.add('oculto'); btn.disabled = true; btn.textContent = 'Ingresando…';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: usuario.value, clave: clave.value })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo ingresar');
+    location.href = ['gerente', 'supervisor', 'invitado'].includes(d.rol) ? '/admin' : '/mi-panel';
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('oculto');
+    btn.disabled = false; btn.textContent = 'Ingresar';
+  }
+});
+</script>
+</body>
+</html>

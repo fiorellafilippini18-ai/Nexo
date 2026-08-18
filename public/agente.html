@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="claro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexo</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="marca">
+      <span class="logo" id="marcaLogo">N</span>
+      <span><b id="marcaT">Nexo</b><small id="marcaS">Desempeño &amp; resultados</small></span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="grupo">Mi trabajo</div>
+      <button data-v="panel" class="on"><span class="ic">◧</span>Mis resultados</button>
+      <button data-v="detalle"><span class="ic">▤</span>Detalle por criterio</button>
+      <button data-v="evolucion"><span class="ic">◔</span>Mi evolución</button>
+      <button data-v="notas"><span class="ic">✉</span>Notas del supervisor<span class="badge rojo oculto" id="bNotas">0</span></button>
+      <div class="grupo">Cuenta</div>
+      <button data-v="ajustes"><span class="ic">⚙</span>Ajustes</button>
+    </nav>
+
+    <div class="pie" id="pie" title="Cambiar estado o cerrar sesión">
+      <span id="pieAvatar"></span>
+      <span class="quien"><b id="pieNombre">—</b><small id="piePuesto"></small></span>
+      <span class="btn sm icono" id="btnSalir" title="Menú">⋯</span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="encabezado">
+      <button class="btn icono" id="btnMenu">☰</button>
+      <div>
+        <h1 id="tituloVista">Mis resultados</h1>
+        <div class="sub" id="subVista">Cómo te fue en el periodo</div>
+      </div>
+      <div class="sp"></div>
+      <div style="min-width:160px">
+        <label class="f" for="periodo">Periodo</label>
+        <select id="periodo"></select>
+      </div>
+      <button class="campana" id="campana" title="Notas">🔔<span class="pt oculto" id="ptNotas">0</span></button>
+    </header>
+
+    <div class="wrap">
+      <div id="avisoClave" class="aviso warn oculto">
+        Estás usando la contraseña provisoria. Cambiala en <b>Ajustes → Mi perfil</b>.
+      </div>
+      <section class="vista on" id="v-panel"></section>
+      <section class="vista" id="v-detalle"></section>
+      <section class="vista" id="v-evolucion"></section>
+      <section class="vista" id="v-notas"></section>
+      <section class="vista" id="v-ajustes"></section>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/comun.js"></script>
+<script src="/js/agente.js"></script>
+</body>
+</html>

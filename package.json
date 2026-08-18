@@ -1,0 +1,23 @@
+{
+  "name": "panel-desempeno",
+  "version": "1.0.0",
+  "description": "Panel de desempeño para agentes de atención al cliente",
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "init-db": "node src/init.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.12.0",
+    "xlsx": "^0.18.5"
+  }
+}

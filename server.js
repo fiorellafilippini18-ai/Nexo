@@ -5,6 +5,8 @@ import connectPgSimple from 'connect-pg-simple';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import path from 'node:path';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { pool, q, one, all, migrate, norm } from './src/db.js';
@@ -796,16 +798,36 @@ app.post('/api/comentario', pedirLogin, pedir('notas'), async (req, res) => {
 /* ---------------------------------------------------------------
    Páginas
 --------------------------------------------------------------- */
+/* Cada publicación cambia esta firma, y con ella la dirección del CSS y de los
+   scripts. Así el navegador nunca se queda con una versión vieja guardada. */
+const VERSION = (() => {
+  const h = crypto.createHash('sha1');
+  for (const f of ['css/app.css', 'js/comun.js', 'js/admin.js', 'js/agente.js']) {
+    try { h.update(String(fs.statSync(path.join(__dirname, 'public', f)).mtimeMs)); }
+    catch (e) { /* si falta alguno, no pasa nada */ }
+  }
+  return h.digest('hex').slice(0, 8);
+})();
+
+const paginas = {};
+const enviarPagina = (nombre) => (req, res) => {
+  if (!paginas[nombre]) {
+    paginas[nombre] = fs.readFileSync(path.join(__dirname, 'public', nombre), 'utf8')
+      .replace(/__V__/g, VERSION);
+  }
+  res.set('Cache-Control', 'no-cache').type('html').send(paginas[nombre]);
+};
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
-  if (!req.session.uid) return res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  if (!req.session.uid) return enviarPagina('login.html')(req, res);
   res.redirect(['gerente', 'supervisor', 'invitado'].includes(req.session.rol) ? '/admin' : '/mi-panel');
 });
 app.get('/admin', (req, res) =>
   ['gerente', 'supervisor', 'invitado'].includes(req.session.rol)
-    ? res.sendFile(path.join(__dirname, 'public', 'admin.html')) : res.redirect('/'));
+    ? enviarPagina('admin.html')(req, res) : res.redirect('/'));
 app.get('/mi-panel', (req, res) =>
-  req.session.uid ? res.sendFile(path.join(__dirname, 'public', 'agente.html')) : res.redirect('/'));
+  req.session.uid ? enviarPagina('agente.html')(req, res) : res.redirect('/'));
 
 app.use((err, req, res, next) => {
   console.error(err);

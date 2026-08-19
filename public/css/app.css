@@ -99,8 +99,7 @@ a{color:var(--primary)}
   background:radial-gradient(120% 90% at 15% 0%, #6d4fe8 0%, #3a24c4 45%, #1c1060 100%)}
 .login-box{background:var(--surface);border-radius:20px;padding:34px;width:100%;max-width:400px;
   box-shadow:0 22px 60px rgba(15,6,60,.4)}
-.login-box .logo{width:46px;height:46px;border-radius:13px;background:var(--primary);color:#fff;
-  display:grid;place-items:center;font-weight:800;font-size:17px;margin-bottom:16px;letter-spacing:-.02em}
+.login-box .logo{width:50px;height:50px;display:block;margin-bottom:16px}
 .login-box h1{margin:0 0 4px;font-size:22px;letter-spacing:-.02em}
 .login-box p.sub{margin:0 0 24px;color:var(--ink-2);font-size:14px}
 
@@ -112,8 +111,15 @@ a{color:var(--primary)}
   display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto;z-index:40
 }
 .sidebar .marca{display:flex;align-items:center;gap:11px;padding:20px 18px;border-bottom:1px solid var(--side-borde)}
-.sidebar .marca .logo{width:36px;height:36px;border-radius:11px;background:var(--primary);
-  display:grid;place-items:center;color:#fff;font-weight:800;font-size:13.5px;flex:0 0 auto}
+.sidebar .marca .logo{width:40px;height:40px;display:block;flex:0 0 auto}
+
+/* El logo es el mismo dibujo que el ícono de la pestaña: barras de desempeño
+   atrás y la placa con la inicial adelante. El "aro" toma el color del fondo
+   sobre el que está apoyado, para que la placa se recorte limpia. */
+.logo svg{width:100%;height:100%;display:block;overflow:visible}
+.logo svg .aro{fill:var(--side)}
+.login-box .logo svg .aro{fill:var(--surface)}
+.logo svg text.ini{font-family:var(--font)}
 .sidebar .marca b{color:var(--side-ink-hi);font-size:15.5px;letter-spacing:-.01em;line-height:1.2}
 .sidebar .marca small{display:block;color:var(--muted);font-size:11.5px;font-weight:400}
 
@@ -335,16 +341,20 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .podio h2{margin:0;font-size:20px;letter-spacing:-.02em;color:#fff}
 .podio .lead{margin:5px 0 20px;font-size:13.5px;opacity:.88;position:relative;max-width:70ch}
 
-.podio .estrella{display:flex;align-items:center;gap:18px;background:rgba(0,0,0,.26);
-  border:1px solid rgba(255,255,255,.2);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;
-  position:relative;flex-wrap:wrap}
+/* La barra del mejor asesor va en verde de celebración: es el logro más alto
+   del periodo y tiene que distinguirse del resto en cualquier paleta. */
+.podio .estrella{display:flex;align-items:center;gap:18px;
+  background:linear-gradient(135deg, var(--celebra) 0%, var(--celebra-alto) 100%);
+  color:var(--celebra-ink);
+  border:1px solid rgba(34,48,10,.22);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;
+  position:relative;flex-wrap:wrap;box-shadow:0 8px 26px rgba(0,0,0,.2)}
 .podio .estrella .corona{font-size:40px;line-height:1}
 .podio .estrella .quien{flex:1;min-width:180px}
 .podio .estrella .rol{font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--celebra);margin-bottom:2px}
+  color:rgba(34,48,10,.8);margin-bottom:2px}
 .podio .estrella .nom{font-size:26px;font-weight:800;letter-spacing:-.025em;line-height:1.15}
-.podio .estrella .det{font-size:13px;opacity:.9;margin-top:3px}
-.podio .estrella .avatar{width:60px;height:60px;font-size:20px;border-color:rgba(255,255,255,.5)}
+.podio .estrella .det{font-size:13px;color:rgba(34,48,10,.8);margin-top:3px}
+.podio .estrella .avatar{width:60px;height:60px;font-size:20px;border-color:rgba(34,48,10,.3)}
 
 .mvps{display:grid;gap:13px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));position:relative}
 .mvp{background:var(--mvp-bg);color:var(--mvp-ink);border-radius:var(--radius-sm);padding:15px 17px;

@@ -65,9 +65,20 @@ const Marca = {
     const t = $('#marcaT'), l = $('#marcaS'), lg = $('#marcaLogo');
     if (t) t.textContent = this.nombre;
     if (l) l.textContent = this.lema;
-    if (lg) lg.textContent = this.nombre.slice(0, 1).toUpperCase();
+    if (lg) inicialDelLogo(lg, this.nombre.slice(0, 1).toUpperCase());
   }
 };
+
+/** El logo trae la "N" dibujada a mano, idéntica a la del ícono de la pestaña.
+ *  Si algún día la marca empieza con otra letra, mostramos esa letra en texto. */
+function inicialDelLogo(caja, letra) {
+  const ene = caja.querySelector('.ene'), ini = caja.querySelector('.ini');
+  if (!ene || !ini) return;
+  const esN = letra === 'N';
+  ene.classList.toggle('oculto', !esN);
+  ini.classList.toggle('oculto', esN);
+  ini.textContent = letra;
+}
 
 /** ¿Esta persona puede hacer tal cosa? La gerencia siempre puede. */
 const puede = (yo, clave) => !!yo && (yo.rol === 'gerente' || (yo.permisos || []).includes(clave));

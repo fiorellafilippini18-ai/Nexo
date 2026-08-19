@@ -161,13 +161,16 @@ app.get('/api/yo', pedirLogin, async (req, res) => {
 });
 
 /* --- Nombre de la plataforma --- */
+/** Paletas que el sistema conoce. La primera es la de fábrica. */
+const PALETAS = ['indigo', 'rosa', 'lavanda'];
+
 async function leerMarca() {
   const filas = await all('SELECT clave, valor FROM config');
   const c = Object.fromEntries(filas.map((f) => [f.clave, f.valor]));
   return {
     marca: c.marca || 'Nexo',
     lema: c.lema || 'Desempeño & resultados',
-    paleta: c.paleta === 'rosa' ? 'rosa' : 'indigo'
+    paleta: PALETAS.includes(c.paleta) ? c.paleta : 'indigo'
   };
 }
 
@@ -175,7 +178,7 @@ app.get('/api/marca', async (req, res) => res.json(await leerMarca()));
 
 app.put('/api/marca', pedirLogin, pedir('marca'), async (req, res) => {
   const { marca, lema, paleta } = req.body;
-  const paletaOk = paleta === undefined ? undefined : (paleta === 'rosa' ? 'rosa' : 'indigo');
+  const paletaOk = paleta === undefined ? undefined : (PALETAS.includes(paleta) ? paleta : 'indigo');
   for (const [clave, valor] of [['marca', marca], ['lema', lema], ['paleta', paletaOk]]) {
     if (valor === undefined) continue;
     await q(`INSERT INTO config (clave, valor) VALUES ($1,$2)
@@ -233,7 +236,7 @@ app.put('/api/perfil', pedirLogin, async (req, res) => {
 app.put('/api/preferencias', pedirLogin, async (req, res) => {
   const { tema, escala, sonido, paleta } = req.body;
   const temaOk = ['claro', 'oscuro', 'auto'].includes(tema) ? tema : null;
-  const paletaOk = ['auto', 'indigo', 'rosa'].includes(paleta) ? paleta : null;
+  const paletaOk = ['auto', ...PALETAS].includes(paleta) ? paleta : null;
   const escalaOk = escala === undefined ? null : Math.max(85, Math.min(140, Number(escala) || 100));
   await q(`UPDATE usuarios SET tema=COALESCE($1,tema), escala=COALESCE($2,escala),
            sonido=COALESCE($3,sonido), paleta=COALESCE($4,paleta) WHERE id=$5`,

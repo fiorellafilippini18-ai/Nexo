@@ -31,7 +31,7 @@
 <script>
 const $ = (s) => document.querySelector(s);
 fetch('/api/marca').then(r => r.json()).then((m) => {
-  if (m.paleta === 'rosa') document.documentElement.setAttribute('data-palette', 'rosa');
+  if (m.paleta && m.paleta !== 'indigo') document.documentElement.setAttribute('data-palette', m.paleta);
   document.title = `${m.marca} — ${m.lema}`;
   $('#marcaT').textContent = m.marca;
   $('#marcaS').textContent = m.lema;

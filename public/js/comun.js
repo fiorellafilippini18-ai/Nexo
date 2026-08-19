@@ -59,7 +59,8 @@ const Marca = {
       this.lema = m.lema || this.lema;
       if (m.paleta) this.paleta = m.paleta;
     }
-    if (this.paletaEfectiva === 'rosa') document.documentElement.setAttribute('data-palette', 'rosa');
+    const pal = this.paletaEfectiva;
+    if (pal && pal !== 'indigo') document.documentElement.setAttribute('data-palette', pal);
     else document.documentElement.removeAttribute('data-palette');
     document.title = `${this.nombre} — ${this.lema}`;
     const t = $('#marcaT'), l = $('#marcaS'), lg = $('#marcaLogo');
@@ -79,6 +80,15 @@ function inicialDelLogo(caja, letra) {
   ini.classList.toggle('oculto', esN);
   ini.textContent = letra;
 }
+
+/* Las paletas disponibles: clave, nombre visible y los dos colores de la muestra.
+   Para sumar una nueva alcanza con agregarla acá y definirla en app.css. */
+const PALETAS = [
+  ['indigo',  'Índigo',  '#3a24c4', '#e9e2fb'],
+  ['rosa',    'Rosa',    '#d81b60', '#fbe4ee'],
+  ['lavanda', 'Lavanda', '#6d3ae8', '#f0e9fc']
+];
+const muestraDe = (p) => (PALETAS.find(([v]) => v === p) || PALETAS[0]).slice(2);
 
 /** ¿Esta persona puede hacer tal cosa? La gerencia siempre puede. */
 const puede = (yo, clave) => !!yo && (yo.rol === 'gerente' || (yo.permisos || []).includes(clave));
@@ -263,10 +273,9 @@ function panelAjustes(YO, alGuardarPerfil) {
       <div class="txt"><b>Paleta de colores</b><span>Podés quedarte con la de la plataforma o elegir la tuya.</span></div>
     </div>
     <div class="temas" style="margin-bottom:6px">
-      ${[['auto', 'La de la plataforma', null], ['indigo', 'Índigo', 'indigo'], ['rosa', 'Rosa', 'rosa']]
+      ${[['auto', 'La de la plataforma', null], ...PALETAS.map(([v, t]) => [v, t, v])]
         .map(([v, t, pal]) => {
-          const p = pal || Marca.paleta;
-          const [a, b] = p === 'rosa' ? ['#d81b60', '#fbe4ee'] : ['#3a24c4', '#e9e2fb'];
+          const [a, b] = muestraDe(pal || Marca.paleta);
           return `<div class="tema-op ${(YO.paleta || 'auto') === v ? 'on' : ''}" data-mipaleta="${v}">
             <div class="muestra"><span class="a" style="background:${a}!important"></span>
               <span class="b" style="background:${b}"></span></div>${t}</div>`;
@@ -290,7 +299,7 @@ function panelAjustes(YO, alGuardarPerfil) {
         y la de la pantalla de ingreso. Cada quien puede cambiar la suya desde Apariencia.</span></div>
     </div>
     <div class="temas">
-      ${[['indigo', 'Índigo', '#3a24c4', '#e9e2fb'], ['rosa', 'Rosa', '#d81b60', '#fbe4ee']]
+      ${PALETAS
         .map(([v, t, a, b]) => `<div class="tema-op ${Marca.paleta === v ? 'on' : ''}" data-paleta="${v}">
           <div class="muestra"><span class="a" style="background:${a}!important"></span>
             <span class="b" style="background:${b}"></span></div>${t}</div>`).join('')}
@@ -404,7 +413,7 @@ function activarAjustes(YO, refrescar) {
       // el cuadradito de "La de la plataforma" refleja la paleta recién elegida
       const auto = $('[data-mipaleta="auto"] .muestra');
       if (auto) {
-        const [a, b] = Marca.paleta === 'rosa' ? ['#d81b60', '#fbe4ee'] : ['#3a24c4', '#e9e2fb'];
+        const [a, b] = muestraDe(Marca.paleta);
         auto.children[0].style.setProperty('background', a, 'important');
         auto.children[1].style.background = b;
       }

@@ -42,6 +42,9 @@
   --celebra-alto: #aed322;
   --celebra-ink:  #22300a;
 
+  /* Color del texto sobre el botón principal: se aclara u oscurece según el tono. */
+  --primary-ink:  #ffffff;
+
   --radius: 14px;
   --radius-sm: 10px;
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -50,6 +53,7 @@
 
 [data-theme="oscuro"] {
   color-scheme: dark;
+  --primary-ink:  #14092e;
   --plane:        #0f0a24;
   --surface:      #191140;
   --surface-2:    #221856;
@@ -175,7 +179,7 @@ input[type=range]{padding:0;background:transparent;accent-color:var(--primary)}
 .btn{border:1px solid var(--border);background:var(--surface-2);color:var(--ink);border-radius:var(--radius-sm);
   padding:10px 16px;cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap;transition:.13s}
 .btn:hover{background:var(--primary-suave);border-color:var(--primary)}
-.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
 .btn.primary:hover{background:var(--primary-alto);border-color:var(--primary-alto)}
 .btn.lima{background:var(--lima);border-color:var(--lima);color:var(--lima-ink)}
 .btn.lima:hover{background:var(--lima-alto);border-color:var(--lima-alto)}
@@ -471,6 +475,7 @@ tr.editor td{background:var(--surface-2)}
 
 [data-palette="rosa"][data-theme="oscuro"] {
   color-scheme: dark;
+  --primary-ink:  #2a0517;
   --plane:        #0b0713;
   --surface:      #160f24;
   --surface-2:    #1f1531;
@@ -518,6 +523,85 @@ tr.editor td{background:var(--surface-2)}
 [data-palette="rosa"] .resultado.critical{background:linear-gradient(135deg,#d12b55,#9c1738)}
 [data-palette="rosa"] .semaforo.on{background:#12b877;box-shadow:0 0 0 1px rgba(0,0,0,.12), 0 0 7px rgba(18,184,119,.7)}
 [data-palette="rosa"] .semaforo.off{background:#d34062}
+
+/* =========================================================
+   Paleta: lavanda suave
+   ========================================================= */
+[data-palette="lavanda"],
+[data-palette="lavanda"][data-theme="claro"] {
+  color-scheme: light;
+  --plane:        #f0e9fc;
+  --surface:      #ffffff;
+  --surface-2:    #f7f2ff;
+  --ink:          #1f1035;
+  --ink-2:        #4e3878;
+  --muted:        #7d6aa6;
+  --grid:         #e6dcf9;
+  --axis:         #cbbaee;
+  --border:       rgba(60,30,120,.14);
+  --sombra:       0 1px 2px rgba(60,30,120,.06), 0 8px 24px rgba(60,30,120,.08);
+
+  --primary:      #6d3ae8;
+  --primary-alto: #572bc4;
+  --primary-suave:#ece3ff;
+  --lima:         #c4b0ff;
+  --lima-alto:    #b39cff;
+  --lima-ink:     #2b1257;
+
+  --side:         #2a1b4d;
+  --side-2:       #372462;
+  --side-ink:     #c9b8ee;
+  --side-ink-hi:  #ffffff;
+  --side-borde:   rgba(255,255,255,.11);
+
+  --good:#0f8a2f; --warning:#a87400; --serious:#c4562a; --critical:#c02b3f;
+  --good-bg:#e3f6e6; --warning-bg:#fdf1d6; --serious-bg:#fbe9e0; --critical-bg:#fae6e9;
+  --good-ink:#0b5f22; --warning-ink:#6f4c00; --serious-ink:#8a3d17; --critical-ink:#8d1f2c;
+
+  --mvp-bg:#fbf8ff; --mvp-ink:#1f1035; --mvp-ink-2:#4e3878; --mvp-acc:#6d3ae8; --mvp-sub:#7d6aa6;
+}
+[data-palette="lavanda"][data-theme="oscuro"] {
+  color-scheme: dark;
+  --primary-ink:  #1c0d3a;
+  --plane:        #120a26;
+  --surface:      #1c1236;
+  --surface-2:    #261a47;
+  --ink:          #ece5ff;
+  --ink-2:        #bfaeea;
+  --muted:        #9184c0;
+  --grid:         #2e2158;
+  --axis:         #40307a;
+  --border:       rgba(255,255,255,.13);
+  --sombra:       0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.4);
+
+  --primary:      #9d7bff;
+  --primary-alto: #b399ff;
+  --primary-suave:#2c1a55;
+  --lima:         #b8a3ff;
+  --lima-alto:    #cbbaff;
+  --lima-ink:     #1c0d3a;
+
+  --side:         #0f0920;
+  --side-2:       #1c1238;
+  --side-ink:     #b7a6e2;
+  --side-ink-hi:  #ffffff;
+  --side-borde:   rgba(255,255,255,.09);
+
+  --good:#3ddc97; --warning:#ffc857; --serious:#ff9e6d; --critical:#ff6b8a;
+  --good-bg:#0d3328; --warning-bg:#3a2c07; --serious-bg:#3b2115; --critical-bg:#3b141f;
+  --good-ink:#7ff0bd; --warning-ink:#ffd98a; --serious-ink:#ffbc9c; --critical-ink:#ffa7ba;
+
+  --mvp-bg:#fbf8ff; --mvp-ink:#1f1035; --mvp-ink-2:#4e3878; --mvp-acc:#6d3ae8; --mvp-sub:#7d6aa6;
+}
+[data-palette="lavanda"] .login-wrap{
+  background:radial-gradient(120% 90% at 15% 0%, #a586ff 0%, #6d3ae8 45%, #1f1035 100%)}
+[data-palette="lavanda"] .podio{
+  background:linear-gradient(135deg,#6d3ae8 0%,#8a5cf0 55%,#a586ff 100%);
+  box-shadow:0 10px 34px rgba(109,58,232,.28)}
+[data-palette="lavanda"][data-theme="oscuro"] .podio{
+  background:linear-gradient(135deg,#4a25a8 0%,#6d3ae8 55%,#8a5cf0 100%)}
+[data-palette="lavanda"] .podio::after{
+  background:radial-gradient(circle, rgba(195,232,46,.24) 0%, transparent 68%)}
 
 /* Lista de permisos dentro de la tabla de invitados */
 .permiso-lista{display:flex;flex-wrap:wrap;gap:5px;max-width:340px}

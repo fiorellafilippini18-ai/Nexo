@@ -508,3 +508,7 @@ tr.editor td{background:var(--surface-2)}
 [data-palette="rosa"] .resultado.critical{background:linear-gradient(135deg,#d12b55,#9c1738)}
 [data-palette="rosa"] .semaforo.on{background:#12b877;box-shadow:0 0 0 1px rgba(0,0,0,.12), 0 0 7px rgba(18,184,119,.7)}
 [data-palette="rosa"] .semaforo.off{background:#d34062}
+
+/* La columna del botón "Ver panel" no debe empujar la tabla */
+#eqTabla td:last-child{white-space:nowrap;padding-left:4px}
+#eqTabla td:last-child .btn{padding:5px 9px;font-size:12px}

@@ -249,6 +249,10 @@ async function importar() {
 
 /* ---------------- equipo ---------------- */
 $('#eqPeriodo').addEventListener('change', cargarEquipo);
+$('#eqVerBtn').addEventListener('click', () => {
+  const id = $('#eqVerSel').value;
+  if (id) location.href = '/mi-panel?ver=' + id;
+});
 async function cargarEquipo() {
   const id = $('#eqPeriodo').value; if (!id) return;
   let d;
@@ -267,6 +271,15 @@ async function cargarEquipo() {
     cont.innerHTML = podioHTML(podio, -1);
   } catch (e) { /* sin podio */ }
 
+  // atajo arriba de todo: elegir persona y abrir su panel sin tener que bajar
+  const sel = $('#eqVerSel');
+  if (sel) {
+    const v = sel.value;
+    sel.innerHTML = d.filas.map((f) => `<option value="${f.id}">${esc(f.nombre)}</option>`).join('');
+    if (v) sel.value = v;
+    $('#eqVerBtn').classList.toggle('oculto', !d.filas.length);
+  }
+
   $('#eqTabla').innerHTML = d.filas.length ? `<table><thead><tr>
       <th>Colaborador</th>${principales.map((m) => `<th class="num">${esc(m.nombre)}</th>`).join('')}
       <th class="num">Cumplidos</th><th>Resultado</th><th></th></tr></thead><tbody>
@@ -281,8 +294,8 @@ async function cargarEquipo() {
       }).join('')}
       <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
-      <td style="text-align:right"><a class="btn sm" href="/mi-panel?ver=${f.id}" target="_blank"
-           title="Abrir su panel tal como lo ve esa persona">👁 Ver su panel</a></td>
+      <td style="text-align:right"><a class="btn sm" href="/mi-panel?ver=${f.id}"
+           title="Ver su panel tal como lo ve esa persona">👁 Ver panel</a></td>
     </tr>`).join('')}</tbody></table>`
     : '<div class="vacio">No hay datos cargados en este periodo.</div>';
 }

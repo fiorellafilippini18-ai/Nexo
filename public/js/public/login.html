@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="claro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexo</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#c2185b">
+<link rel="stylesheet" href="/css/app.css?v=__V__">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-box" id="f">
+    <div class="logo" id="marcaLogo"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lgm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5c9d"/><stop offset="1" stop-color="#c2185b"/></linearGradient></defs><rect x="22" y="30" width="10" height="20" rx="3.5" fill="#ff7ab8"/><rect x="36" y="18" width="10" height="32" rx="3.5" fill="#f5359a"/><rect x="50" y="6" width="10" height="44" rx="3.5" fill="#f5359a"/><rect class="aro" x="0" y="26" width="38" height="38" rx="10"/><rect x="2" y="28" width="34" height="34" rx="9" fill="url(#lgm)"/><path class="ene" d="M10,54 L10,36 L15,36 L23,48.6 L23,36 L28,36 L28,54 L23,54 L15,41.4 L15,54 Z" fill="#fff"/><text class="ini oculto" x="19" y="51" text-anchor="middle" fill="#fff" font-size="27" font-weight="800">N</text></svg></div>
+    <h1 id="marcaT">Nexo</h1>
+    <p class="sub"><span id="marcaS">Desempeño &amp; resultados</span><br>Ingresá con el usuario que te dieron.</p>
+    <div id="err" class="aviso err oculto"></div>
+    <div style="margin-bottom:14px">
+      <label class="f" for="usuario">Usuario</label>
+      <input id="usuario" name="usuario" autocomplete="username" autocapitalize="none" required>
+    </div>
+    <div style="margin-bottom:20px">
+      <label class="f" for="clave">Contraseña</label>
+      <input id="clave" name="clave" type="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn primary block" type="submit" id="btn">Ingresar</button>
+  </form>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+fetch('/api/marca').then(r => r.json()).then((m) => {
+  if (m.paleta && m.paleta !== 'indigo') document.documentElement.setAttribute('data-palette', m.paleta);
+  document.title = `${m.marca} — ${m.lema}`;
+  $('#marcaT').textContent = m.marca;
+  $('#marcaS').textContent = m.lema;
+  const letra = m.marca.slice(0, 1).toUpperCase();
+  const ene = $('#marcaLogo .ene'), ini = $('#marcaLogo .ini');
+  if (ene && ini) {
+    ene.classList.toggle('oculto', letra !== 'N');
+    ini.classList.toggle('oculto', letra === 'N');
+    ini.textContent = letra;
+  }
+}).catch(() => {});
+
+const f = document.getElementById('f'), err = document.getElementById('err'), btn = document.getElementById('btn');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.classList.add('oculto'); btn.disabled = true; btn.textContent = 'Ingresando…';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: usuario.value, clave: clave.value })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo ingresar');
+    location.href = ['gerente', 'supervisor', 'invitado'].includes(d.rol) ? '/admin' : '/mi-panel';
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('oculto');
+    btn.disabled = false; btn.textContent = 'Ingresar';
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="claro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexo</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#c2185b">
+<link rel="stylesheet" href="/css/app.css?v=__V__">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="marca">
+      <span class="logo" id="marcaLogo"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lgm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5c9d"/><stop offset="1" stop-color="#c2185b"/></linearGradient></defs><rect x="22" y="30" width="10" height="20" rx="3.5" fill="#ff7ab8"/><rect x="36" y="18" width="10" height="32" rx="3.5" fill="#f5359a"/><rect x="50" y="6" width="10" height="44" rx="3.5" fill="#f5359a"/><rect class="aro" x="0" y="26" width="38" height="38" rx="10"/><rect x="2" y="28" width="34" height="34" rx="9" fill="url(#lgm)"/><path class="ene" d="M10,54 L10,36 L15,36 L23,48.6 L23,36 L28,36 L28,54 L23,54 L15,41.4 L15,54 Z" fill="#fff"/><text class="ini oculto" x="19" y="51" text-anchor="middle" fill="#fff" font-size="27" font-weight="800">N</text></svg></span>
+      <span><b id="marcaT">Nexo</b><small id="marcaS">Desempeño &amp; resultados</small></span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="grupo">Gestión</div>
+      <button data-v="equipo" class="on"><span class="ic">◧</span>Equipo<span class="badge" id="bEquipo">0</span></button>
+      <button data-v="destacados"><span class="ic">★</span>Destacados</button>
+      <button data-v="cargar"><span class="ic">⭱</span>Cargar planilla</button>
+      <button data-v="notas"><span class="ic">✉</span>Notas al equipo</button>
+      <div class="grupo">Configuración</div>
+      <button data-v="personas"><span class="ic">◉</span>Colaboradores<span class="badge" id="bPersonas">0</span></button>
+      <button data-v="invitados"><span class="ic">◍</span>Invitados<span class="badge" id="bInvitados">0</span></button>
+      <button data-v="indicadores"><span class="ic">▤</span>Indicadores</button>
+      <button data-v="periodos"><span class="ic">▦</span>Periodos</button>
+      <div class="grupo">Cuenta</div>
+      <button data-v="ajustes"><span class="ic">⚙</span>Ajustes</button>
+    </nav>
+
+    <div class="pie" id="pie" title="Cambiar estado o cerrar sesión">
+      <span id="pieAvatar"></span>
+      <span class="quien"><b id="pieNombre">—</b><small id="piePuesto">Supervisión</small></span>
+      <span class="btn sm icono" id="btnSalir" title="Menú">⋯</span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="encabezado">
+      <button class="btn icono" id="btnMenu">☰</button>
+      <div>
+        <h1 id="tituloVista">Cargar planilla</h1>
+        <div class="sub" id="subVista">Subí el Excel del periodo</div>
+      </div>
+      <div class="sp"></div>
+      <button class="btn icono" id="btnTema" title="Cambiar modo claro / oscuro">◐</button>
+    </header>
+
+    <div class="wrap">
+
+      <!-- ======== CARGAR PLANILLA ======== -->
+      <section class="vista on" id="v-cargar">
+        <div class="paso">
+          <span class="on"><b>1</b> Elegir periodo</span> ›
+          <span><b>2</b> Subir el Excel</span> ›
+          <span><b>3</b> Revisar lo que leyó</span> ›
+          <span><b>4</b> Publicar</span>
+        </div>
+
+        <div class="card">
+          <h2>1. ¿A qué periodo corresponde?</h2>
+          <p class="sub">Elegí uno existente o creá el de esta quincena / mes.</p>
+          <div class="row">
+            <div><label class="f">Periodo existente</label><select id="perSel"></select></div>
+          </div>
+          <details style="margin-top:18px">
+            <summary style="cursor:pointer;font-size:14px;color:var(--primary);font-weight:600">Crear un periodo nuevo</summary>
+            <div class="row" style="margin-top:14px">
+              <div><label class="f">Tipo</label><select id="nTipo"><option value="quincenal">Quincenal</option><option value="mensual">Mensual</option></select></div>
+              <div><label class="f">Mes</label><input type="month" id="nMes"></div>
+              <div id="wQuinc"><label class="f">Quincena</label><select id="nQuinc"><option value="1">1ª (1 al 15)</option><option value="2">2ª (16 a fin de mes)</option></select></div>
+            </div>
+            <div class="flex" style="margin-top:14px">
+              <span style="font-size:13.5px;color:var(--ink-2)">Se va a llamar: <b id="nEtiqueta">—</b></span>
+              <div class="sp"></div>
+              <button class="btn primary" id="nCrear">Crear periodo</button>
+            </div>
+          </details>
+        </div>
+
+        <div class="card">
+          <h2>2. Subí la planilla</h2>
+          <p class="sub">Excel (.xlsx) o CSV. La app busca sola la hoja donde hay una fila por agente.</p>
+          <div class="drop" id="drop">
+            <div id="dropTxt"><b>Arrastrá el archivo acá</b><br><span style="font-size:13.5px">o hacé clic para elegirlo</span></div>
+          </div>
+          <input type="file" id="file" accept=".xlsx,.xls,.csv" class="oculto">
+          <div id="subErr" class="aviso err oculto" style="margin-top:15px"></div>
+        </div>
+
+        <div id="p3"></div>
+      </section>
+
+      <!-- ======== EQUIPO ======== -->
+      <section class="vista" id="v-equipo">
+        <div class="card">
+          <div class="flex">
+            <div><h2 style="margin:0">Resultados del equipo</h2>
+              <p class="sub" style="margin:3px 0 0">Vista completa. Cada agente solo ve lo suyo.</p></div>
+            <div class="sp"></div>
+            <select id="eqPeriodo" style="width:auto;min-width:210px"></select>
+          </div>
+          <div class="flex" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--grid)">
+            <span style="font-size:13.5px;color:var(--ink-2)">👁 Ver el panel de:</span>
+            <select id="eqVerSel" style="width:auto;min-width:190px"></select>
+            <button class="btn primary" id="eqVerBtn">Abrir su panel</button>
+            <span style="font-size:12.5px;color:var(--muted)">Lo vas a ver acá mismo, tal como lo ve esa persona.</span>
+          </div>
+        </div>
+        <div id="eqResumen" class="grid" style="margin-bottom:18px"></div>
+        <div class="card"><div class="scroll"><div id="eqTabla"></div></div></div>
+        <div class="card">
+          <h2>Comentario del periodo</h2>
+          <p class="sub">Aparece en el panel del colaborador, debajo de sus resultados de este periodo.</p>
+          <div class="row">
+            <div><label class="f">Colaborador</label><select id="coUsuario"></select></div>
+          </div>
+          <div style="margin-top:13px"><label class="f">Mensaje</label><textarea id="coTexto" placeholder="Ej: Muy buen mes en calidad. Enfocate en bajar el tiempo de respuesta de la mañana."></textarea></div>
+          <div style="margin-top:13px"><button class="btn primary" id="coGuardar">Guardar comentario</button></div>
+        </div>
+      </section>
+
+      <!-- ======== NOTAS ======== -->
+      <section class="vista" id="v-notas">
+        <div class="card">
+          <h2>Dejar una nota en un perfil</h2>
+          <p class="sub">Le llega al instante y, si tiene el sonido activado, le suena una campanita.</p>
+          <div class="row">
+            <div><label class="f">Colaborador</label><select id="ntUsuario"></select></div>
+            <div><label class="f">Tipo</label><select id="ntTipo">
+              <option value="nota">📝 Nota</option>
+              <option value="felicitacion">🎉 Felicitación</option>
+              <option value="atencion">⚠️ Llamado de atención</option>
+            </select></div>
+          </div>
+          <div style="margin-top:13px"><label class="f">Mensaje</label><textarea id="ntTexto" placeholder="Ej: Excelente manejo del reclamo de ayer. Seguí así."></textarea></div>
+          <div style="margin-top:13px"><button class="btn primary" id="ntEnviar">Enviar nota</button></div>
+        </div>
+        <div class="card">
+          <div class="flex"><b style="font-size:16px">Notas enviadas</b><div class="sp"></div>
+            <select id="ntFiltro" style="width:auto;min-width:200px"></select></div>
+          <div id="ntLista" style="margin-top:16px"></div>
+        </div>
+      </section>
+
+      <!-- ======== PERSONAS ======== -->
+      <section class="vista" id="v-personas">
+        <div class="card">
+          <h2>Agregar colaborador</h2>
+          <p class="sub">Agentes y supervisión: son quienes cuentan como equipo y aparecen en los resultados.
+            Para alguien que solo va a mirar, usá la sección <b>Invitados</b>.
+            La contraseña es provisoria: al entrar por primera vez el sistema le pide cambiarla.</p>
+          <div id="usErr" class="aviso err oculto"></div>
+          <div class="row">
+            <div><label class="f">Nombre completo *</label><input id="uNombre" placeholder="Ej: Melissa Sanabria"></div>
+            <div><label class="f">Usuario *</label><input id="uUsuario" placeholder="melissa" autocapitalize="none"></div>
+            <div><label class="f">Puesto</label><input id="uPuesto" placeholder="Agente CRM"></div>
+            <div><label class="f">Contraseña provisoria *</label><input id="uClave" placeholder="mínimo 6 caracteres"></div>
+            <div><label class="f">Rol</label><select id="uRol">
+              <option value="agente">Agente — ve solo lo suyo</option>
+              <option value="supervisor" id="optSupervisor">Supervisor — permisos a medida</option>
+            </select></div>
+          </div>
+          <div style="margin-top:15px"><button class="btn primary" id="uCrear">+ Agregar colaborador</button></div>
+        </div>
+        <div class="card">
+          <h2>Equipo</h2>
+          <p class="sub">Acá está quien forma parte del equipo: agentes y supervisión. Los invitados tienen
+            su propia sección. Los "nombres en la planilla" son las formas en que aparece cada persona
+            en el Excel; se aprenden solos en cada carga.</p>
+          <div class="scroll"><div id="usTabla"></div></div>
+        </div>
+      </section>
+
+      <!-- ======== INVITADOS ======== -->
+      <section class="vista" id="v-invitados">
+        <div class="card">
+          <h2>Agregar invitado</h2>
+          <p class="sub">Un invitado solo mira: no cuenta como colaborador y no aparece en los resultados
+            ni en el podio. La contraseña es provisoria y el sistema le pide cambiarla al entrar.</p>
+          <div id="invErr" class="aviso err oculto"></div>
+          <div class="row">
+            <div><label class="f">Nombre completo *</label><input id="iNombre" placeholder="Ej: Carla Ramírez"></div>
+            <div><label class="f">Usuario *</label><input id="iUsuario" placeholder="carla" autocapitalize="none"></div>
+            <div><label class="f">Puesto o motivo</label><input id="iPuesto" placeholder="Ej: Gerencia comercial"></div>
+            <div><label class="f">Contraseña provisoria *</label><input id="iClave" placeholder="mínimo 6 caracteres"></div>
+          </div>
+          <div style="margin-top:15px"><button class="btn primary" id="iCrear">+ Agregar invitado</button></div>
+        </div>
+        <div class="card">
+          <h2>Invitados del sistema</h2>
+          <p class="sub">Quién entra solo a mirar, con qué rol y exactamente qué puede hacer adentro.</p>
+          <div class="scroll"><div id="invTabla"></div></div>
+        </div>
+      </section>
+
+      <!-- ======== INDICADORES ======== -->
+      <section class="vista" id="v-indicadores">
+        <div class="card">
+          <h2>Indicadores</h2>
+          <p class="sub">Los marcados como <b>principales</b> definen el plus. El consejo se le muestra al agente cuando no llega a la meta.</p>
+          <div class="scroll"><div id="mtTabla"></div></div>
+        </div>
+        <div class="card">
+          <h3>Agregar indicador a mano</h3>
+          <p class="sub">Normalmente no hace falta: se crean solos al leer la planilla.</p>
+          <div class="row">
+            <div><label class="f">Nombre</label><input id="mNombre"></div>
+            <div><label class="f">Unidad</label><input id="mUnidad" placeholder="min, chats, puntos"></div>
+            <div><label class="f">Mejor cuando es</label><select id="mDir"><option value="mayor">Mayor</option><option value="menor">Menor</option></select></div>
+            <div><label class="f">Meta</label><input type="number" step="0.01" id="mMeta"></div>
+          </div>
+          <div style="margin-top:15px"><button class="btn primary" id="mCrear">+ Agregar</button></div>
+        </div>
+      </section>
+
+      <!-- ======== PERIODOS ======== -->
+      <section class="vista" id="v-periodos">
+        <div class="card">
+          <h2>Periodos</h2>
+          <p class="sub">Desde <b>Gestionar</b> podés publicar, archivar, deshacer una carga mal hecha
+            o ver el historial de lo que se subió.</p>
+          <div class="scroll"><div id="peTabla"></div></div>
+        </div>
+      </section>
+
+      <!-- ======== DESTACADOS ======== -->
+      <section class="vista" id="v-destacados">
+        <div class="card">
+          <div class="flex">
+            <div><h2 style="margin:0">Podio del periodo</h2>
+              <p class="sub" style="margin:3px 0 0">Esto es lo que ve todo el equipo al entrar.</p></div>
+            <div class="sp"></div>
+            <select id="dsPeriodo" style="width:auto;min-width:210px"></select>
+          </div>
+        </div>
+        <div id="dsPodio"></div>
+        <div class="card">
+          <h2>Registro histórico de destacados</h2>
+          <p class="sub">Cuántas veces salió destacada cada persona. Se recalcula sobre los periodos publicados.</p>
+          <div class="flex" style="margin-bottom:16px">
+            <div><label class="f">Desde</label><input type="date" id="dsDesde" style="width:auto"></div>
+            <div><label class="f">Hasta</label><input type="date" id="dsHasta" style="width:auto"></div>
+            <button class="btn" id="dsFiltrar" style="align-self:flex-end">Filtrar</button>
+            <button class="btn" id="dsLimpiar" style="align-self:flex-end">Ver todo</button>
+            <div class="sp"></div>
+            <button class="btn sm" id="dsCSV" style="align-self:flex-end">⭳ CSV</button>
+          </div>
+          <div class="scroll"><div id="dsTabla"></div></div>
+        </div>
+        <div class="card">
+          <h2>Destacados periodo por periodo</h2>
+          <p class="sub">El detalle de cada mes o quincena publicada.</p>
+          <div id="dsDetalle"></div>
+        </div>
+      </section>
+
+      <!-- ======== AJUSTES ======== -->
+      <section class="vista" id="v-ajustes"></section>
+
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/comun.js?v=__V__"></script>
+<script src="/js/admin.js?v=__V__"></script>
+</body>
+</html>

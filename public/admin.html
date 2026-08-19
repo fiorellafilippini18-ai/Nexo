@@ -27,6 +27,7 @@
       <button data-v="notas"><span class="ic">✉</span>Notas al equipo</button>
       <div class="grupo">Configuración</div>
       <button data-v="personas"><span class="ic">◉</span>Colaboradores<span class="badge" id="bPersonas">0</span></button>
+      <button data-v="invitados"><span class="ic">◍</span>Invitados<span class="badge" id="bInvitados">0</span></button>
       <button data-v="indicadores"><span class="ic">▤</span>Indicadores</button>
       <button data-v="periodos"><span class="ic">▦</span>Periodos</button>
       <div class="grupo">Cuenta</div>
@@ -152,7 +153,9 @@
       <section class="vista" id="v-personas">
         <div class="card">
           <h2>Agregar colaborador</h2>
-          <p class="sub">La contraseña es provisoria: al entrar por primera vez el sistema le pide cambiarla.</p>
+          <p class="sub">Agentes y supervisión: son quienes cuentan como equipo y aparecen en los resultados.
+            Para alguien que solo va a mirar, usá la sección <b>Invitados</b>.
+            La contraseña es provisoria: al entrar por primera vez el sistema le pide cambiarla.</p>
           <div id="usErr" class="aviso err oculto"></div>
           <div class="row">
             <div><label class="f">Nombre completo *</label><input id="uNombre" placeholder="Ej: Melissa Sanabria"></div>
@@ -161,7 +164,6 @@
             <div><label class="f">Contraseña provisoria *</label><input id="uClave" placeholder="mínimo 6 caracteres"></div>
             <div><label class="f">Rol</label><select id="uRol">
               <option value="agente">Agente — ve solo lo suyo</option>
-              <option value="invitado">Invitado — solo mira los resultados</option>
               <option value="supervisor" id="optSupervisor">Supervisor — permisos a medida</option>
             </select></div>
           </div>
@@ -169,8 +171,32 @@
         </div>
         <div class="card">
           <h2>Equipo</h2>
-          <p class="sub">Los "nombres en la planilla" son las formas en que aparece cada persona en el Excel. Se aprenden solos en cada carga.</p>
+          <p class="sub">Acá está quien forma parte del equipo: agentes y supervisión. Los invitados tienen
+            su propia sección. Los "nombres en la planilla" son las formas en que aparece cada persona
+            en el Excel; se aprenden solos en cada carga.</p>
           <div class="scroll"><div id="usTabla"></div></div>
+        </div>
+      </section>
+
+      <!-- ======== INVITADOS ======== -->
+      <section class="vista" id="v-invitados">
+        <div class="card">
+          <h2>Agregar invitado</h2>
+          <p class="sub">Un invitado solo mira: no cuenta como colaborador y no aparece en los resultados
+            ni en el podio. La contraseña es provisoria y el sistema le pide cambiarla al entrar.</p>
+          <div id="invErr" class="aviso err oculto"></div>
+          <div class="row">
+            <div><label class="f">Nombre completo *</label><input id="iNombre" placeholder="Ej: Carla Ramírez"></div>
+            <div><label class="f">Usuario *</label><input id="iUsuario" placeholder="carla" autocapitalize="none"></div>
+            <div><label class="f">Puesto o motivo</label><input id="iPuesto" placeholder="Ej: Gerencia comercial"></div>
+            <div><label class="f">Contraseña provisoria *</label><input id="iClave" placeholder="mínimo 6 caracteres"></div>
+          </div>
+          <div style="margin-top:15px"><button class="btn primary" id="iCrear">+ Agregar invitado</button></div>
+        </div>
+        <div class="card">
+          <h2>Invitados del sistema</h2>
+          <p class="sub">Quién entra solo a mirar, con qué rol y exactamente qué puede hacer adentro.</p>
+          <div class="scroll"><div id="invTabla"></div></div>
         </div>
       </section>
 

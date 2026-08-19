@@ -8,6 +8,7 @@ const TITULOS = {
   destacados:  ['Destacados', 'Podio del periodo y registro histórico'],
   notas:       ['Notas al equipo', 'Mensajes en el perfil de cada persona'],
   personas:    ['Colaboradores', 'Alta y gestión del equipo'],
+  invitados:   ['Invitados', 'Quién entra solo a mirar, con qué permisos'],
   indicadores: ['Indicadores', 'Metas y consejos de mejora'],
   periodos:    ['Periodos', 'Publicar y administrar periodos'],
   ajustes:     ['Ajustes', 'Perfil, apariencia y notificaciones']
@@ -24,7 +25,8 @@ async function iniciar() {
 
   // La barra lateral se arma con lo que cada persona tiene permitido
   const REQUIERE = { cargar: 'cargar', equipo: 'ver_equipo', destacados: 'ver_equipo',
-                     notas: 'notas', personas: 'personas', indicadores: 'indicadores', periodos: 'periodos' };
+                     notas: 'notas', personas: 'personas', invitados: 'personas',
+                     indicadores: 'indicadores', periodos: 'periodos' };
   Object.entries(REQUIERE).forEach(([vista, permiso]) => {
     if (!puede(YO, permiso)) { const b = $(`#nav button[data-v="${vista}"]`); if (b) b.remove(); }
   });
@@ -42,7 +44,10 @@ async function iniciar() {
   ir(valida ? pedida : (primera ? primera.dataset.v : 'ajustes'));
 
   await recargar();
-  setInterval(() => { if (VISTA === 'personas') pintarUsuarios(); }, 45000);
+  setInterval(() => {
+    if (VISTA === 'personas') pintarUsuarios();
+    if (VISTA === 'invitados') pintarInvitados();
+  }, 45000);
 }
 
 function pintarIdentidad() {
@@ -50,6 +55,10 @@ function pintarIdentidad() {
   $('#pieNombre').textContent = YO.nombre;
   $('#piePuesto').textContent = YO.puesto || 'Supervisión';
 }
+
+/** Quién cuenta como colaborador: la gente del equipo que aparece (o puede aparecer)
+ *  en la planilla. Supervisión cuenta; los invitados no, porque solo miran. */
+const esColaborador = (u) => !!u.activo && (u.rol === 'agente' || u.rol === 'supervisor');
 
 async function recargar() {
   const [pe, me, us, pm] = await Promise.all([
@@ -65,9 +74,10 @@ async function recargar() {
   const fv = $('#ntFiltro').value;
   $('#ntFiltro').innerHTML = '<option value="">Todo el equipo</option>' + opUsuarios;
   $('#ntFiltro').value = fv;
-  $('#bPersonas').textContent = USUARIOS.filter((u) => u.rol === 'agente' && u.activo).length;
+  $('#bPersonas').textContent = USUARIOS.filter(esColaborador).length;
+  const bi = $('#bInvitados'); if (bi) bi.textContent = USUARIOS.filter((u) => u.activo && u.rol === 'invitado').length;
   $('#bEquipo').textContent = PERIODOS.filter((p) => p.publicado && !p.archivado).length;
-  pintarUsuarios(); pintarMetricas(); pintarPeriodos(); cargarNotasAdmin();
+  pintarUsuarios(); pintarInvitados(); pintarMetricas(); pintarPeriodos(); cargarNotasAdmin();
   if (PERIODOS.length) cargarEquipo();
 }
 
@@ -81,6 +91,7 @@ function ir(v) {
   $('#sidebar').classList.remove('abierta');
   if (v === 'ajustes') { $('#v-ajustes').innerHTML = panelAjustes(YO); activarAjustes(YO, pintarIdentidad); }
   if (v === 'destacados') cargarDestacados();
+  if (v === 'invitados') pintarInvitados();
 }
 $('#nav').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) ir(b.dataset.v); });
 $('#btnMenu').addEventListener('click', () => $('#sidebar').classList.toggle('abierta'));
@@ -170,13 +181,15 @@ function pintarRevision() {
     ${sinMapear ? `<div class="aviso warn">Hay <b>${sinMapear}</b> nombre(s) de la planilla que no reconozco. Asignalos abajo o quedarán fuera de la carga.</div>` : `<div class="aviso ok">Reconocí a las ${HOJA.personasMapeadas.length} personas de la planilla.</div>`}
 
     <h3 style="margin-top:22px">Personas</h3>
-    <div class="scroll"><table><thead><tr><th>Nombre en la planilla</th><th>Es esta persona</th></tr></thead><tbody>
+    <div class="scroll"><table><thead><tr><th>Nombre en la planilla</th><th>Es esta persona</th><th></th></tr></thead><tbody>
       ${HOJA.personasMapeadas.map((p, i) => `<tr>
         <td><b>${esc(p.texto)}</b></td>
         <td><select data-persona="${i}" style="max-width:280px">
           <option value="">— No cargar esta fila —</option>
-          ${USUARIOS.filter((u) => u.activo).map((u) => `<option value="${u.id}"${p.usuarioId === u.id ? ' selected' : ''}>${esc(u.nombre)}</option>`).join('')}
-        </select></td></tr>`).join('')}
+          ${USUARIOS.filter(esColaborador).map((u) => `<option value="${u.id}"${p.usuarioId === u.id ? ' selected' : ''}>${esc(u.nombre)}</option>`).join('')}
+        </select></td>
+        <td>${p.usuarioId ? '' : `<button class="btn sm" data-nuevo="${esc(p.texto)}"
+          title="Darla de alta como colaboradora y volver acá">+ Darla de alta</button>`}</td></tr>`).join('')}
     </tbody></table></div>
 
     <h3 style="margin-top:24px">Indicadores</h3>
@@ -210,6 +223,19 @@ function pintarRevision() {
 
   $$('#p3 [data-persona]').forEach((s) => s.addEventListener('change', (e) => {
     HOJA.personasMapeadas[+e.target.dataset.persona].usuarioId = e.target.value ? +e.target.value : null;
+  }));
+  // Atajo: si en la planilla aparece alguien que todavía no está en el sistema,
+  // se la da de alta desde Colaboradores con el nombre ya escrito.
+  $$('#p3 [data-nuevo]').forEach((b) => b.addEventListener('click', () => {
+    const nombre = b.dataset.nuevo;
+    ir('personas');
+    $('#uNombre').value = nombre;
+    $('#uUsuario').value = nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z ]/g, '').trim().split(/\s+/)[0] || '';
+    $('#uRol').value = 'agente';
+    $('#uNombre').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#uClave').focus();
+    toast('Poné una contraseña provisoria y agregala. Después volvé a Cargar planilla.');
   }));
   $$('#p3 [data-col]').forEach((el) => el.addEventListener('change', (e) => {
     const c = HOJA.columnas.filter((x) => x.numerica)[+e.target.dataset.col];
@@ -421,8 +447,10 @@ $('#uCrear').addEventListener('click', async () => {
 });
 
 function pintarUsuarios() {
-  const activos = USUARIOS.filter((u) => u.activo);
-  const bajas = USUARIOS.filter((u) => !u.activo);
+  // Los invitados tienen su propia sección: acá va solo el equipo.
+  const delEquipo = (u) => u.rol !== 'invitado';
+  const activos = USUARIOS.filter((u) => u.activo && delEquipo(u));
+  const bajas = USUARIOS.filter((u) => !u.activo && delEquipo(u));
   const fila = (u) => `<tr class="${u.activo ? '' : 'dado-de-baja'}" data-fila="${u.id}">
       <td><div class="who">${avatarEstado(u)}<div>
         <b>${esc(u.nombre)}</b>${u.activo ? '' : '<span class="tag-baja">eliminada</span>'}
@@ -455,6 +483,57 @@ function pintarUsuarios() {
       <div class="scroll"><table><tbody>${bajas.map(fila).join('')}</tbody></table></div>` : ''}`;
   if (EDITANDO) abrirEditor(EDITANDO);
 }
+
+/** Sección aparte para los invitados: quiénes son y qué pueden hacer exactamente.
+ *  No cuentan como colaboradores ni aparecen en los resultados. */
+function pintarInvitados() {
+  const caja = $('#invTabla'); if (!caja) return;
+  const activos = USUARIOS.filter((u) => u.activo && u.rol === 'invitado');
+  const bajas = USUARIOS.filter((u) => !u.activo && u.rol === 'invitado');
+  const nombrePermiso = (k) => { const p = CATALOGO.find(([c]) => c === k); return p ? p[1] : k; };
+
+  const fila = (u) => `<tr class="${u.activo ? '' : 'dado-de-baja'}" data-fila="${u.id}">
+      <td><div class="who">${avatarEstado(u)}<div>
+        <b>${esc(u.nombre)}</b>${u.activo ? '' : '<span class="tag-baja">eliminada</span>'}
+        <small>${esc(textoSemaforo(u))}</small>
+      </div></div></td>
+      <td>${esc(u.usuario)}</td>
+      <td>${esc(u.puesto || '—')}</td>
+      <td><span class="pill gris">Invitado</span></td>
+      <td>${(u.permisos || []).length
+          ? `<div class="permiso-lista">${u.permisos.map((k) => `<span class="pill gris">${esc(nombrePermiso(k))}</span>`).join('')}</div>`
+          : '<small style="color:var(--muted)">Solo entra: no ve resultados de nadie</small>'}</td>
+      <td><div class="acciones">
+        ${!puede(YO, 'personas') ? '' : `<button class="btn sm" data-editar="${u.id}">Editar</button>
+        ${u.activo
+          ? `<button class="btn sm danger" data-baja="${u.id}">Quitar acceso</button>`
+          : `<button class="btn sm" data-alta="${u.id}">Reactivar</button>`}`}
+      </div></td>
+    </tr>`;
+
+  caja.innerHTML = !activos.length && !bajas.length
+    ? '<p class="sub">Todavía no hay invitados. Agregá uno arriba si querés que alguien mire los resultados sin formar parte del equipo.</p>'
+    : `<table><thead><tr>
+        <th>Invitado</th><th>Usuario</th><th>Puesto o motivo</th><th>Rol</th>
+        <th>Qué puede hacer</th><th></th></tr></thead>
+      <tbody>${activos.map(fila).join('')}</tbody></table>
+      ${bajas.length ? `<h3 style="margin:26px 0 4px">Invitados sin acceso</h3>
+        <p class="sub">Ya no pueden entrar. Podés reactivarlos cuando quieras.</p>
+        <div class="scroll"><table><tbody>${bajas.map(fila).join('')}</tbody></table></div>` : ''}`;
+  if (EDITANDO) abrirEditor(EDITANDO);
+}
+
+$('#iCrear').addEventListener('click', async () => {
+  const err = $('#invErr'); err.classList.add('oculto');
+  try {
+    await api('/api/usuarios', { method: 'POST', body: {
+      nombre: $('#iNombre').value.trim(), usuario: $('#iUsuario').value.trim(),
+      puesto: $('#iPuesto').value.trim(), rol: 'invitado', clave: $('#iClave').value } });
+    ['#iNombre', '#iUsuario', '#iPuesto', '#iClave'].forEach((s) => ($(s).value = ''));
+    toast('Invitado agregado');
+    recargar();
+  } catch (e) { err.textContent = e.message; err.classList.remove('oculto'); }
+});
 
 /** Editor en línea, debajo de la fila de la persona. */
 function abrirEditor(id) {
@@ -551,7 +630,7 @@ function abrirEditor(id) {
   });
 }
 
-$('#usTabla').addEventListener('click', async (e) => {
+const accionesDeFila = async (e) => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.editar) {
     const id = Number(b.dataset.editar);
@@ -560,7 +639,10 @@ $('#usTabla').addEventListener('click', async (e) => {
   }
   if (b.dataset.baja) {
     const u = USUARIOS.find((x) => x.id === Number(b.dataset.baja));
-    if (!confirm(`${u.nombre} deja de tener acceso al sistema.\n\nSus ${u.registros} registros se conservan y va a figurar como "${u.nombre} (eliminada)" en los informes, así los resultados de los periodos anteriores no cambian.\n\n¿Continuar?`)) return;
+    const aviso = u.rol === 'invitado'
+      ? `${u.nombre} deja de tener acceso al sistema.\n\nEs un invitado: no tiene resultados cargados, así que no cambia nada de los informes.\n\n¿Continuar?`
+      : `${u.nombre} deja de tener acceso al sistema.\n\nSus ${u.registros} registros se conservan y va a figurar como "${u.nombre} (eliminada)" en los informes, así los resultados de los periodos anteriores no cambian.\n\n¿Continuar?`;
+    if (!confirm(aviso)) return;
     try { await api('/api/usuarios/' + u.id, { method: 'DELETE' }); toast('Dada de baja — sus datos se conservan'); recargar(); }
     catch (err) { toast(err.message, true); }
   }
@@ -568,7 +650,9 @@ $('#usTabla').addEventListener('click', async (e) => {
     await api(`/api/usuarios/${b.dataset.alta}/alta`, { method: 'POST' });
     toast('Reincorporada al equipo'); recargar();
   }
-});
+};
+$('#usTabla').addEventListener('click', accionesDeFila);
+$('#invTabla').addEventListener('click', accionesDeFila);
 
 /* ---------------- indicadores ---------------- */
 function pintarMetricas() {

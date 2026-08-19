@@ -607,6 +607,10 @@ tr.editor td{background:var(--surface-2)}
 [data-palette="lavanda"] .podio::after{
   background:radial-gradient(circle, rgba(195,232,46,.24) 0%, transparent 68%)}
 
+/* En la tabla del equipo, la fila de quien está mirando queda resaltada */
+#eqTabla tr.yo td{background:var(--primary-suave)}
+#eqTabla tr.yo td:first-child{box-shadow:inset 3px 0 0 var(--primary)}
+
 /* Lista de permisos dentro de la tabla de invitados */
 .permiso-lista{display:flex;flex-wrap:wrap;gap:5px;max-width:340px}
 

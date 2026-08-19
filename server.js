@@ -767,9 +767,15 @@ app.get('/api/palmares', pedirLogin, async (req, res) => {
 });
 
 /** Vista de equipo (solo supervisor). */
-app.get('/api/equipo/:periodoId', pedirLogin, pedirGestion, async (req, res) => {
+/** La tabla del equipo. La ve todo el mundo, pero quien no tiene permiso de
+ *  gestión solo puede mirar periodos ya publicados (y no archivados). */
+app.get('/api/equipo/:periodoId', pedirLogin, async (req, res) => {
   const per = await one('SELECT * FROM periodos WHERE id=$1', [req.params.periodoId]);
   if (!per) return res.status(404).json({ error: 'Periodo inexistente' });
+  const gestion = req.permisos.includes('ver_equipo');
+  if ((!per.publicado || per.archivado) && !gestion) {
+    return res.status(403).json({ error: 'Ese periodo no está disponible' });
+  }
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
   const filas = Object.values(porUsuario)
     .map((u) => ({ ...u, ...evaluar(metricas, u.valores, promedios) }))

@@ -1,6 +1,6 @@
 /* Pantalla del colaborador. */
 let YO = null, PERIODOS = [], ACTUAL = null, DATOS = null, NOTAS = [], VISTA = 'panel';
-let PODIO = null, PALMARES = null;
+let PODIO = null, PALMARES = null, EQUIPO = null;
 let ultimaNotaVista = null;
 
 /* Modo "ver como": la supervisión abre /mi-panel?ver=<id> para mirar el panel
@@ -12,6 +12,7 @@ const dePanel = () => VER || (YO && YO.id);
 
 const TITULOS = {
   panel:     ['Mis resultados', 'Cómo te fue en el periodo'],
+  equipo:    ['Resultados del equipo', 'Cómo le fue a todo el equipo en el periodo'],
   detalle:   ['Detalle por criterio', 'Aspecto por aspecto'],
   evolucion: ['Mi evolución', 'Cómo venís periodo a periodo'],
   notas:     ['Notas del supervisor', 'Mensajes dejados en tu perfil'],
@@ -65,12 +66,13 @@ function tituloDe(v) {
 }
 
 async function cargar() {
-  const [d, podio, palmares] = await Promise.all([
+  const [d, podio, palmares, equipo] = await Promise.all([
     api('/api/mi-desempeno/' + ACTUAL + qs()),
     api('/api/destacados/' + ACTUAL).catch(() => null),
-    api('/api/palmares' + qs()).catch(() => null)
+    api('/api/palmares' + qs()).catch(() => null),
+    api('/api/equipo/' + ACTUAL).catch(() => null)
   ]);
-  DATOS = d; PODIO = podio; PALMARES = palmares;
+  DATOS = d; PODIO = podio; PALMARES = palmares; EQUIPO = equipo;
   if (VER && d.persona) {
     $('#verNombre').textContent = d.persona.nombre;
     document.title = 'Panel de ' + d.persona.nombre;
@@ -245,6 +247,61 @@ function pintar() {
 }
 
 /* ================= NAVEGACIÓN ================= */
+/* =========================================================
+   Resultados del equipo — la misma tabla que ve la supervisión,
+   visible para todo el equipo. Sin botones de gestión.
+   ========================================================= */
+
+/** Los títulos que vienen del Excel son largos; en el encabezado se recortan. */
+const tituloCorto = (n) => String(n || '')
+  .replace(/\s+en\s+turno\b/i, '')
+  .replace(/\s+evaluad[oa]s?\b/i, '')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
+
+function pintarEquipo() {
+  const caja = $('#v-equipo'); if (!caja) return;
+  if (!EQUIPO || !EQUIPO.filas || !EQUIPO.filas.length) {
+    caja.innerHTML = `<div class="card"><h2>Resultados del equipo</h2>
+      <div class="vacio">Todavía no hay resultados publicados en este periodo.</div></div>`;
+    return;
+  }
+
+  const yo = dePanel();
+  // Solo las columnas que tienen datos cargados en este periodo
+  const conDatos = (m) => EQUIPO.filas.some((f) => {
+    const x = f.detalle.find((y) => y.id === m.id);
+    return x && x.valor !== null && x.valor !== undefined;
+  });
+  const principales = EQUIPO.metricas.filter((m) => m.principal && conDatos(m));
+
+  const fila = (f) => `<tr class="${f.id === yo ? 'yo' : ''}">
+      <td><div class="who">${avatarHTML(f)}<div>
+        <b>${esc(f.nombre)}</b>${f.id === yo ? '<span class="pill lima" style="margin-left:7px">sos vos</span>' : ''}
+        <small>${esc(f.puesto || '')}</small></div></div></td>
+      ${principales.map((m) => {
+        const det = f.detalle.find((x) => x.id === m.id);
+        return `<td class="num">${det && det.valor !== null
+          ? `${nfmt(det.valor, m.decimales)} ${det.cumple
+              ? '<span style="color:var(--good)">✓</span>'
+              : '<span style="color:var(--critical)">✕</span>'}`
+          : '—'}</td>`;
+      }).join('')}
+      <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
+      <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
+    </tr>`;
+
+  caja.innerHTML = `<div class="card">
+    <h2>Resultados de ${esc(EQUIPO.periodo.etiqueta)}</h2>
+    <p class="sub">Cómo le fue a cada persona del equipo. Tu fila está resaltada.</p>
+    <div class="scroll"><div id="eqTabla"><table><thead><tr>
+      <th>Colaborador</th>
+      ${principales.map((m) => `<th class="num" title="${esc(m.nombre)}">${esc(tituloCorto(m.nombre))}</th>`).join('')}
+      <th class="num">Cumplidos</th><th>Resultado</th>
+    </tr></thead><tbody>${EQUIPO.filas.map(fila).join('')}</tbody></table></div></div>
+  </div>`;
+}
+
 function ir(v) {
   VISTA = v;
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
@@ -254,6 +311,7 @@ function ir(v) {
   $('#subVista').textContent = t2;
   $('#sidebar').classList.remove('abierta');
   if (v === 'notas') pintarNotas();
+  if (v === 'equipo') pintarEquipo();
   if (v === 'ajustes') {
     $('#v-ajustes').innerHTML = panelAjustes(YO);
     activarAjustes(YO, pintarIdentidad);

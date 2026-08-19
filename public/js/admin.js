@@ -283,6 +283,14 @@ $('#eqVerBtn').addEventListener('click', () => {
   const id = $('#eqVerSel').value;
   if (id) location.href = '/mi-panel?ver=' + id;
 });
+/** Los nombres que vienen del Excel suelen ser larguísimos. En el encabezado de la
+ *  tabla se recortan las muletillas; el nombre completo queda en el globito. */
+const tituloCorto = (n) => String(n || '')
+  .replace(/\s+en\s+turno\b/i, '')
+  .replace(/\s+evaluad[oa]s?\b/i, '')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
+
 async function cargarEquipo() {
   const id = $('#eqPeriodo').value; if (!id) return;
   let d;
@@ -293,7 +301,13 @@ async function cargarEquipo() {
       <div class="v">${d.resumen[e.clave] || 0}</div>
       <div class="m">${esc(e.plus)}</div></div>`).join('');
 
-  const principales = d.metricas.filter((m) => m.principal);
+  // Solo se muestran los indicadores principales que realmente tienen datos cargados
+  // en este periodo: una columna llena de guiones no le dice nada a nadie.
+  const conDatos = (m) => d.filas.some((f) => {
+    const x = f.detalle.find((y) => y.id === m.id);
+    return x && x.valor !== null && x.valor !== undefined;
+  });
+  const principales = d.metricas.filter((m) => m.principal && conDatos(m));
   try {
     const podio = await api('/api/destacados/' + id);
     $('#eqResumen').insertAdjacentHTML('beforebegin', '');
@@ -311,7 +325,7 @@ async function cargarEquipo() {
   }
 
   $('#eqTabla').innerHTML = d.filas.length ? `<table><thead><tr>
-      <th>Colaborador</th>${principales.map((m) => `<th class="num">${esc(m.nombre)}</th>`).join('')}
+      <th>Colaborador</th>${principales.map((m) => `<th class="num" title="${esc(m.nombre)}">${esc(tituloCorto(m.nombre))}</th>`).join('')}
       <th class="num">Cumplidos</th><th>Resultado</th><th></th></tr></thead><tbody>
     ${d.filas.map((f) => `<tr>
       <td><div class="who">${avatarEstado({ ...f, ...(USUARIOS.find((u) => u.id === f.id) || {}) })}<div>

@@ -264,26 +264,31 @@ function panelAjustes(YO, alGuardarPerfil) {
     <div class="opcion">
       <div class="txt"><b>Modo de la página</b><span>Claro, oscuro o el que use tu dispositivo.</span></div>
     </div>
-    <div class="temas" style="margin-bottom:6px">
-      ${[['claro', 'Claro', '#3a24c4', '#e9e2fb'], ['oscuro', 'Oscuro', '#8b74ff', '#0f0a24'], ['auto', 'Automático', '#3a24c4', '#0f0a24']]
-        .map(([v, t, a, b]) => `<div class="tema-op ${YO.tema === v ? 'on' : ''}" data-tema="${v}">
-          <div class="muestra"><span class="a" style="background:${a}"></span><span class="b" style="background:${b}"></span></div>${t}</div>`).join('')}
+    <div class="colores" id="opModo" style="margin-bottom:6px">
+      ${[['claro', 'Claro', '#f4f1ff'], ['oscuro', 'Oscuro', '#151033'],
+         ['auto', 'Automático', 'linear-gradient(90deg,#f4f1ff 50%,#151033 50%)']]
+        .map(([v, t, fondo]) => `<button type="button" class="color-op ${YO.tema === v ? 'on' : ''}" data-tema="${v}">
+          <span class="punto" style="background:${fondo}"></span>
+          <span><span class="nom">${t}</span></span></button>`).join('')}
     </div>
     <div class="opcion">
-      <div class="txt"><b>Paleta de colores</b><span>Podés quedarte con la de la plataforma o elegir la tuya.</span></div>
+      <div class="txt"><b>Paleta de colores</b><span>El tono del sistema. Claro u oscuro se elige arriba.</span></div>
     </div>
-    <div class="temas" style="margin-bottom:6px">
-      ${[['auto', 'La de la plataforma', null], ...PALETAS.map(([v, t]) => [v, t, v])]
-        .map(([v, t, pal]) => {
-          const [a, b] = muestraDe(pal || Marca.paleta);
-          return `<div class="tema-op ${(YO.paleta || 'auto') === v ? 'on' : ''}" data-mipaleta="${v}">
-            <div class="muestra"><span class="a" style="background:${a}!important"></span>
-              <span class="b" style="background:${b}"></span></div>${t}</div>`;
-        }).join('')}
+    <div class="colores" id="opPaleta" style="margin-bottom:6px">
+      ${(() => {
+        const elegida = YO.paleta && YO.paleta !== 'auto' ? YO.paleta : Marca.paleta;
+        return PALETAS.map(([v, t, a]) => `<button type="button" class="color-op ${elegida === v ? 'on' : ''}" data-mipaleta="${v}">
+          <span class="punto" style="background:${a}"></span>
+          <span><span class="nom">${t}</span><small>${v === Marca.paleta ? 'la de la plataforma' : ''}</small></span>
+        </button>`).join('');
+      })()}
     </div>
     <div class="opcion">
-      <div class="txt"><b>Tamaño del texto</b><span>Si te cuesta leer, subilo — ahora está en <b id="lblEscala">${YO.escala || 100}%</b></span></div>
-      <div style="width:200px"><input type="range" id="rgEscala" min="85" max="140" step="5" value="${YO.escala || 100}"></div>
+      <div class="txt"><b>Tamaño del texto</b><span>Si te cuesta leer, subilo.</span></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <input type="range" id="rgEscala" min="85" max="140" step="5" value="${YO.escala || 100}" style="width:190px">
+        <b id="lblEscala" style="font-size:13.5px;min-width:46px;text-align:right">${YO.escala || 100}%</b>
+      </div>
     </div>
   </div>
 
@@ -298,11 +303,10 @@ function panelAjustes(YO, alGuardarPerfil) {
       <div class="txt"><b>Paleta por defecto de la plataforma</b><span>La que ve quien no eligió una propia,
         y la de la pantalla de ingreso. Cada quien puede cambiar la suya desde Apariencia.</span></div>
     </div>
-    <div class="temas">
-      ${PALETAS
-        .map(([v, t, a, b]) => `<div class="tema-op ${Marca.paleta === v ? 'on' : ''}" data-paleta="${v}">
-          <div class="muestra"><span class="a" style="background:${a}!important"></span>
-            <span class="b" style="background:${b}"></span></div>${t}</div>`).join('')}
+    <div class="colores" id="opPaletaMarca">
+      ${PALETAS.map(([v, t, a]) => `<button type="button" class="color-op ${Marca.paleta === v ? 'on' : ''}" data-paleta="${v}">
+        <span class="punto" style="background:${a}"></span>
+        <span><span class="nom">${t}</span></span></button>`).join('')}
     </div>
     <div style="margin-top:16px"><button class="btn primary" id="mkGuardar">Guardar cambios</button></div>
   </div>` : ''}
@@ -367,15 +371,17 @@ function activarAjustes(YO, refrescar) {
     } catch (e) { err.textContent = e.message; err.classList.remove('oculto'); }
   });
 
-  $$('.tema-op').forEach((op) => op.addEventListener('click', () => {
-    $$('.tema-op').forEach((x) => x.classList.toggle('on', x === op));
+  $$('[data-tema]').forEach((op) => op.addEventListener('click', () => {
+    $$('[data-tema]').forEach((x) => x.classList.toggle('on', x === op));
     YO.tema = op.dataset.tema;
     Apariencia.guardar({ tema: YO.tema });
   }));
 
   $$('[data-mipaleta]').forEach((op) => op.addEventListener('click', () => {
     $$('[data-mipaleta]').forEach((x) => x.classList.toggle('on', x === op));
-    YO.paleta = op.dataset.mipaleta;
+    // Elegir la misma que usa la plataforma queda como "seguir a la plataforma":
+    // si mañana la gerencia la cambia, esta persona la acompaña.
+    YO.paleta = op.dataset.mipaleta === Marca.paleta ? 'auto' : op.dataset.mipaleta;
     Marca.paletaPersonal = YO.paleta;
     Marca.aplicar();
     Apariencia.guardar({ paleta: YO.paleta });
@@ -410,13 +416,11 @@ function activarAjustes(YO, refrescar) {
       const m = await api('/api/marca', { method: 'PUT',
         body: { marca: $('#mkNombre').value, lema: $('#mkLema').value, paleta: paletaElegida } });
       Marca.aplicar(m);
-      // el cuadradito de "La de la plataforma" refleja la paleta recién elegida
-      const auto = $('[data-mipaleta="auto"] .muestra');
-      if (auto) {
-        const [a, b] = muestraDe(Marca.paleta);
-        auto.children[0].style.setProperty('background', a, 'important');
-        auto.children[1].style.background = b;
-      }
+      // la aclaración "la de la plataforma" pasa a la paleta recién elegida
+      $$('#opPaleta .color-op').forEach((b) => {
+        const s = b.querySelector('small');
+        if (s) s.textContent = b.dataset.mipaleta === Marca.paleta ? 'la de la plataforma' : '';
+      });
       toast('Guardado — el cambio se ve para todo el equipo');
     } catch (e) { toast(e.message, true); }
   });

@@ -289,14 +289,18 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .opcion .txt b{display:block;font-size:14.5px}
 .opcion .txt span{font-size:13px;color:var(--ink-2)}
 
-/* Selector de tema */
-.temas{display:flex;gap:11px;flex-wrap:wrap}
-.tema-op{border:2px solid var(--border);border-radius:var(--radius-sm);padding:11px;cursor:pointer;
-  background:var(--surface-2);width:118px;text-align:center;font-size:13px;font-weight:600}
-.tema-op.on{border-color:var(--primary);background:var(--primary-suave)}
-.tema-op .muestra{height:44px;border-radius:8px;margin-bottom:9px;border:1px solid var(--border);display:flex;overflow:hidden}
-.tema-op .muestra .a{width:34%;background:var(--primary)!important}
-.tema-op .muestra .b{flex:1}
+/* Elegir modo y paleta: una fila de fichas iguales, un color por opción */
+.colores{display:flex;gap:10px;flex-wrap:wrap}
+.color-op{display:flex;align-items:center;gap:10px;border:2px solid var(--border);
+  border-radius:var(--radius-sm);padding:9px 15px 9px 11px;background:var(--surface-2);
+  color:var(--ink);cursor:pointer;font-family:inherit;text-align:left}
+.color-op:hover{border-color:var(--primary)}
+.color-op.on{border-color:var(--primary);background:var(--primary-suave)}
+.color-op .punto{width:22px;height:22px;border-radius:50%;flex:0 0 auto;
+  border:1px solid rgba(0,0,0,.18);box-shadow:inset 0 -6px 10px rgba(0,0,0,.12)}
+.color-op .nom{display:block;font-size:13.5px;font-weight:600;line-height:1.25}
+.color-op small{display:block;font-size:11.5px;color:var(--muted);font-weight:500;line-height:1.2}
+.color-op small:empty{display:none}
 
 /* Campanita */
 .campana{position:relative;background:var(--surface-2);border:1px solid var(--border);
@@ -606,6 +610,13 @@ tr.editor td{background:var(--surface-2)}
 /* Lista de permisos dentro de la tabla de invitados */
 .permiso-lista{display:flex;flex-wrap:wrap;gap:5px;max-width:340px}
 
-/* La columna del botón "Ver panel" no debe empujar la tabla */
-#eqTabla td:last-child{white-space:nowrap;padding-left:4px}
+/* La tabla de Equipo tiene que entrar entera, sin correr la pantalla de lado a lado:
+   los títulos largos bajan de renglón y los números nunca se parten. */
+#eqTabla th{white-space:normal;line-height:1.25;max-width:112px;vertical-align:bottom}
+#eqTabla th:first-child{max-width:none}
+#eqTabla th, #eqTabla td{padding:11px 8px}
+#eqTabla td.num{white-space:nowrap}
+#eqTabla .who b{white-space:nowrap}
+#eqTabla .who small{white-space:nowrap}
+#eqTabla td:last-child{white-space:nowrap;padding-left:4px;text-align:right}
 #eqTabla td:last-child .btn{padding:5px 9px;font-size:12px}

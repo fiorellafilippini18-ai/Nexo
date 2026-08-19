@@ -34,8 +34,12 @@ async function iniciar() {
     if (vacio) g.remove();
   });
   if (YO.rol !== 'gerente') { const o = $('#optSupervisor'); if (o) o.remove(); }
+  // si la dirección trae ?v=equipo (por ejemplo al volver de ver el panel de alguien),
+  // se abre esa sección en vez de la primera del menú
+  const pedida = new URLSearchParams(location.search).get('v');
+  const valida = pedida && $(`#nav button[data-v="${pedida}"]`);
   const primera = $('#nav button[data-v]');
-  ir(primera ? primera.dataset.v : 'ajustes');
+  ir(valida ? pedida : (primera ? primera.dataset.v : 'ajustes'));
 
   await recargar();
   setInterval(() => { if (VISTA === 'personas') pintarUsuarios(); }, 45000);

@@ -7,6 +7,8 @@ let ultimaNotaVista = null;
    de otra persona exactamente como lo ve ella. Es solo lectura. */
 const VER = Number(new URLSearchParams(location.search).get('ver')) || null;
 const qs = (extra) => (VER ? (extra ? '&' : '?') + 'usuarioId=' + VER : '');
+/** De quién es el panel que se está pintando: el mío, o el de la persona que miro. */
+const dePanel = () => VER || (YO && YO.id);
 
 const TITULOS = {
   panel:     ['Mis resultados', 'Cómo te fue en el periodo'],
@@ -137,7 +139,7 @@ function pintar() {
   const d = DATOS;
   if (!d) return;
   if (d.sinDatos) {
-    $('#v-panel').innerHTML = podioHTML(PODIO, YO.id) +
+    $('#v-panel').innerHTML = podioHTML(PODIO, dePanel()) +
       `<div class="card"><div class="vacio">No hay datos tuyos cargados en <b>${esc(d.periodo.etiqueta)}</b>.<br>Consultá con tu supervisora.</div></div>`;
     $('#v-detalle').innerHTML = $('#v-evolucion').innerHTML = '';
     return;
@@ -148,7 +150,7 @@ function pintar() {
   const secundarios = d.detalle.filter((m) => !m.principal && m.valor !== null);
 
   /* --- vista principal --- */
-  let html = podioHTML(PODIO, YO.id);
+  let html = podioHTML(PODIO, dePanel());
   if (PALMARES && PALMARES.mio && PALMARES.mio.total) {
     const m = PALMARES.mio;
     const partes = [];

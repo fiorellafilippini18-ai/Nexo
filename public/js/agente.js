@@ -3,6 +3,11 @@ let YO = null, PERIODOS = [], ACTUAL = null, DATOS = null, NOTAS = [], VISTA = '
 let PODIO = null, PALMARES = null;
 let ultimaNotaVista = null;
 
+/* Modo "ver como": la supervisión abre /mi-panel?ver=<id> para mirar el panel
+   de otra persona exactamente como lo ve ella. Es solo lectura. */
+const VER = Number(new URLSearchParams(location.search).get('ver')) || null;
+const qs = (extra) => (VER ? (extra ? '&' : '?') + 'usuarioId=' + VER : '');
+
 const TITULOS = {
   panel:     ['Mis resultados', 'Cómo te fue en el periodo'],
   detalle:   ['Detalle por criterio', 'Aspecto por aspecto'],
@@ -19,7 +24,13 @@ async function iniciar() {
   pintarIdentidad();
   Presencia.iniciar(YO, () => pintarIdentidad());
   montarMenuUsuario($('#pie'), { alAjustes: () => ir('ajustes') });
-  if (YO.debe_cambiar) $('#avisoClave').classList.remove('oculto');
+  if (YO.debe_cambiar && !VER) $('#avisoClave').classList.remove('oculto');
+
+  if (VER) {
+    document.body.classList.add('modo-ver');
+    $('#avisoVer').classList.remove('oculto');
+    const b = $('#nav button[data-v="ajustes"]'); if (b) b.remove();
+  }
 
   PERIODOS = await api('/api/periodos');
   if (PERIODOS.length) {
@@ -40,30 +51,46 @@ function pintarIdentidad() {
   $('#piePuesto').textContent = YO.puesto || 'Colaborador';
 }
 
+/** En modo "ver como", los títulos hablan de la otra persona. */
+function tituloDe(v) {
+  const t = [...TITULOS[v]];
+  if (VER && DATOS && DATOS.persona) {
+    if (v === 'panel') { t[0] = 'Panel de ' + DATOS.persona.nombre; t[1] = 'Lo que ve en su pantalla'; }
+    if (v === 'notas') t[0] = 'Notas recibidas';
+    if (v === 'evolucion') t[1] = 'Cómo viene periodo a periodo';
+  }
+  return t;
+}
+
 async function cargar() {
   const [d, podio, palmares] = await Promise.all([
-    api('/api/mi-desempeno/' + ACTUAL),
+    api('/api/mi-desempeno/' + ACTUAL + qs()),
     api('/api/destacados/' + ACTUAL).catch(() => null),
-    api('/api/palmares').catch(() => null)
+    api('/api/palmares' + qs()).catch(() => null)
   ]);
   DATOS = d; PODIO = podio; PALMARES = palmares;
+  if (VER && d.persona) {
+    $('#verNombre').textContent = d.persona.nombre;
+    document.title = 'Panel de ' + d.persona.nombre;
+  }
   pintar();
+  ir(VISTA);
 }
 
 /* ================= NOTAS ================= */
 async function cargarNotas(primeraVez) {
-  try { NOTAS = await api('/api/notas'); } catch (e) { return; }
+  try { NOTAS = await api('/api/notas' + qs()); } catch (e) { return; }
   const nuevas = NOTAS.filter((n) => !n.leida).length;
   $('#bNotas').textContent = $('#ptNotas').textContent = nuevas;
   $('#bNotas').classList.toggle('oculto', !nuevas);
   $('#ptNotas').classList.toggle('oculto', !nuevas);
 
   const ultima = NOTAS.length ? NOTAS[0].id : null;
-  if (!primeraVez && ultima && ultima !== ultimaNotaVista && nuevas) {
+  if (!VER && !primeraVez && ultima && ultima !== ultimaNotaVista && nuevas) {
     Sonido.sonar();
     toast('Tenés una nota nueva de tu supervisora');
   }
-  if (primeraVez && nuevas) Sonido.sonar();
+  if (!VER && primeraVez && nuevas) Sonido.sonar();
   ultimaNotaVista = ultima;
   if (VISTA === 'notas') pintarNotas();
 }
@@ -72,9 +99,9 @@ function pintarNotas() {
   const iconos = { nota: '📝', felicitacion: '🎉', atencion: '⚠️' };
   $('#v-notas').innerHTML = `<div class="card">
     <div class="flex"><div><h2 style="margin:0">Notas en tu perfil</h2>
-      <p class="sub" style="margin:3px 0 0">Lo que tu supervisora quiere que sepas.</p></div>
+      <p class="sub" style="margin:3px 0 0">${VER ? 'Las notas que recibió esta persona.' : 'Lo que tu supervisora quiere que sepas.'}</p></div>
       <div class="sp"></div>
-      ${NOTAS.some((n) => !n.leida) ? '<button class="btn sm" id="btnLeidas">Marcar como leídas</button>' : ''}
+      ${!VER && NOTAS.some((n) => !n.leida) ? '<button class="btn sm" id="btnLeidas">Marcar como leídas</button>' : ''}
     </div></div>
     ${NOTAS.length ? NOTAS.map((n) => `<div class="nota ${n.leida ? '' : 'nueva'}">
         <div style="font-size:14.5px">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</div>
@@ -220,8 +247,9 @@ function ir(v) {
   VISTA = v;
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
   $$('.vista').forEach((s) => s.classList.toggle('on', s.id === 'v-' + v));
-  $('#tituloVista').textContent = TITULOS[v][0];
-  $('#subVista').textContent = TITULOS[v][1];
+  const [t1, t2] = tituloDe(v);
+  $('#tituloVista').textContent = t1;
+  $('#subVista').textContent = t2;
   $('#sidebar').classList.remove('abierta');
   if (v === 'notas') pintarNotas();
   if (v === 'ajustes') {

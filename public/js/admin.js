@@ -269,9 +269,10 @@ async function cargarEquipo() {
 
   $('#eqTabla').innerHTML = d.filas.length ? `<table><thead><tr>
       <th>Colaborador</th>${principales.map((m) => `<th class="num">${esc(m.nombre)}</th>`).join('')}
-      <th class="num">Cumplidos</th><th>Resultado</th></tr></thead><tbody>
+      <th class="num">Cumplidos</th><th>Resultado</th><th></th></tr></thead><tbody>
     ${d.filas.map((f) => `<tr>
-      <td><div class="who">${avatarHTML(f)}<div><b>${esc(f.nombre)}</b><small>${esc(f.puesto || '')}</small></div></div></td>
+      <td><div class="who">${avatarEstado({ ...f, ...(USUARIOS.find((u) => u.id === f.id) || {}) })}<div>
+        <b>${esc(f.nombre)}</b><small>${esc(f.puesto || '')}</small></div></div></td>
       ${principales.map((m) => {
         const det = f.detalle.find((x) => x.id === m.id);
         return `<td class="num">${det && det.valor !== null
@@ -280,6 +281,8 @@ async function cargarEquipo() {
       }).join('')}
       <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
+      <td style="text-align:right"><a class="btn sm" href="/mi-panel?ver=${f.id}" target="_blank"
+           title="Abrir su panel tal como lo ve esa persona">👁 Ver su panel</a></td>
     </tr>`).join('')}</tbody></table>`
     : '<div class="vacio">No hay datos cargados en este periodo.</div>';
 }

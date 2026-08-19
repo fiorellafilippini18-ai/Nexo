@@ -753,11 +753,13 @@ async function calcularPalmares(desde, hasta) {
 }
 
 app.get('/api/palmares', pedirLogin, async (req, res) => {
-  const { desde, hasta } = req.query;
+  const { desde, hasta, usuarioId } = req.query;
   const datos = await calcularPalmares(desde || null, hasta || null);
-  if (req.permisos.includes('ver_equipo')) return res.json(datos);
-  // el agente ve solo su propio conteo
-  const mio = datos.ranking.find((r) => r.usuarioId === req.session.uid) || null;
+  const puedeVer = req.permisos.includes('ver_equipo');
+  // la supervisión ve el cuadro completo, salvo que pida el de una persona puntual
+  if (puedeVer && !usuarioId) return res.json(datos);
+  const objetivo = puedeVer && usuarioId ? Number(usuarioId) : req.session.uid;
+  const mio = datos.ranking.find((r) => r.usuarioId === objetivo) || null;
   res.json({ periodos: datos.periodos, mio });
 });
 

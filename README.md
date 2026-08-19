@@ -20,6 +20,7 @@ y para que la supervisión lo cargue subiendo directamente el Excel del CRM.
 | **Cargar planilla** | El flujo de cada quincena/mes: elegir el periodo, subir el Excel, revisar lo que leyó la app y publicar. |
 | **Equipo** | Tabla completa con todos los agentes, cuántos indicadores cumplió cada uno y el resultado (Excelente / Bueno / Malo / Crítico). También se escriben los comentarios individuales. |
 | **Destacados** | El podio del periodo y el registro histórico de cuántas veces salió destacada cada persona. |
+| **Ver su panel** | En la tabla de *Equipo*, cada fila tiene un botón 👁 que abre el panel de esa persona tal como lo ve ella, en solo lectura. Sirve para saber exactamente qué está leyendo antes de hablarle. |
 | **Notas al equipo** | Mensajes en el perfil de una persona, con aviso sonoro. |
 | **Colaboradores** | Alta de personas, contraseñas provisorias y los nombres con que aparece cada una en el Excel. |
 | **Indicadores** | Metas, si mayor o menor es mejor, cuáles cuentan para el plus, y el consejo que ve el agente cuando no llega. |

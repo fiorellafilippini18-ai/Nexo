@@ -1,6 +1,6 @@
 /* Pantalla del colaborador. */
 let YO = null, PERIODOS = [], ACTUAL = null, DATOS = null, NOTAS = [], VISTA = 'panel';
-let PODIO = null, PALMARES = null, EQUIPO = null;
+let PODIO = null, PALMARES = null, EQUIPO = null, PROGRESO = null, ANALISIS = null;
 let ultimaNotaVista = null;
 
 /* Modo "ver como": la supervisión abre /mi-panel?ver=<id> para mirar el panel
@@ -12,6 +12,8 @@ const dePanel = () => VER || (YO && YO.id);
 
 const TITULOS = {
   panel:     ['Mis resultados', 'Cómo te fue en el periodo'],
+  progreso:  ['Mi progreso del mes', 'Cuánto te falta para la meta'],
+  analisis:  ['Fortalezas y errores', 'Lo que hacés bien y lo que tenés que corregir'],
   equipo:    ['Resultados del equipo', 'Cómo le fue a todo el equipo en el periodo'],
   detalle:   ['Detalle por criterio', 'Aspecto por aspecto'],
   evolucion: ['Mi evolución', 'Cómo venís periodo a periodo'],
@@ -27,7 +29,19 @@ async function iniciar() {
   pintarIdentidad();
   Presencia.iniciar(YO, () => pintarIdentidad());
   montarMenuUsuario($('#pie'), { alAjustes: () => ir('ajustes') });
-  if (YO.debe_cambiar && !VER) $('#avisoClave').classList.remove('oculto');
+  if (YO.debe_cambiar && !VER && !YO.preview) $('#avisoClave').classList.remove('oculto');
+
+  // Vista previa: mirando el panel como esa persona
+  if (YO.preview) {
+    document.body.classList.add('modo-preview');
+    $('#pvNombre').textContent = YO.preview.nombre;
+    $('#avisoPreview').classList.remove('oculto');
+    $('#pvSalir').addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await api('/api/vista-previa', { method: 'POST', body: { usuarioId: null } }); } catch (x) { /* igual salimos */ }
+      location.href = '/admin?v=personas';
+    });
+  }
 
   if (VER) {
     document.body.classList.add('modo-ver');
@@ -60,19 +74,22 @@ function tituloDe(v) {
   if (VER && DATOS && DATOS.persona) {
     if (v === 'panel') { t[0] = 'Panel de ' + DATOS.persona.nombre; t[1] = 'Lo que ve en su pantalla'; }
     if (v === 'notas') t[0] = 'Notas recibidas';
+    if (v === 'analisis') t[1] = 'Lo que hace bien y lo que tiene que corregir';
     if (v === 'evolucion') t[1] = 'Cómo viene periodo a periodo';
   }
   return t;
 }
 
 async function cargar() {
-  const [d, podio, palmares, equipo] = await Promise.all([
+  const [d, podio, palmares, equipo, progreso, analisis] = await Promise.all([
     api('/api/mi-desempeno/' + ACTUAL + qs()),
     api('/api/destacados/' + ACTUAL).catch(() => null),
     api('/api/palmares' + qs()).catch(() => null),
-    api('/api/equipo/' + ACTUAL).catch(() => null)
+    api('/api/equipo/' + ACTUAL).catch(() => null),
+    api('/api/progreso/' + ACTUAL + qs()).catch(() => null),
+    api('/api/analisis/' + ACTUAL + qs()).catch(() => null)
   ]);
-  DATOS = d; PODIO = podio; PALMARES = palmares; EQUIPO = equipo;
+  DATOS = d; PODIO = podio; PALMARES = palmares; EQUIPO = equipo; PROGRESO = progreso; ANALISIS = analisis;
   if (VER && d.persona) {
     $('#verNombre').textContent = d.persona.nombre;
     document.title = 'Panel de ' + d.persona.nombre;
@@ -84,7 +101,7 @@ async function cargar() {
 /* ================= NOTAS ================= */
 async function cargarNotas(primeraVez) {
   try { NOTAS = await api('/api/notas' + qs()); } catch (e) { return; }
-  const nuevas = NOTAS.filter((n) => !n.leida).length;
+  const nuevas = NOTAS.filter((n) => !n.confirmada).length;
   $('#bNotas').textContent = $('#ptNotas').textContent = nuevas;
   $('#bNotas').classList.toggle('oculto', !nuevas);
   $('#ptNotas').classList.toggle('oculto', !nuevas);
@@ -107,10 +124,10 @@ function pintarNotas() {
       <div class="sp"></div>
       ${!VER && NOTAS.some((n) => !n.leida) ? '<button class="btn sm" id="btnLeidas">Marcar como leídas</button>' : ''}
     </div></div>
-    ${NOTAS.length ? NOTAS.map((n) => `<div class="nota ${n.leida ? '' : 'nueva'}">
+    ${NOTAS.length ? NOTAS.map((n) => `<div class="nota ${n.confirmada ? '' : 'nueva'}">
         <div style="font-size:14.5px">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</div>
-        <div class="meta">${esc(n.autor || 'Supervisión')} · ${new Date(n.creada).toLocaleString('es-PY', { dateStyle: 'medium', timeStyle: 'short' })}
-          ${n.leida ? '' : ' · <b style="color:var(--primary)">Nueva</b>'}</div>
+        <div class="meta">${esc(n.autor || 'Supervisión')} · ${new Date(n.creada).toLocaleString('es-PY', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+        <div class="confirmar" data-nota="${n.id}">${confirmacionHTML(n)}</div>
       </div>`).join('')
     : '<div class="card"><div class="vacio">Todavía no tenés notas.</div></div>'}`;
   const b = $('#btnLeidas');
@@ -119,6 +136,39 @@ function pintarNotas() {
     await cargarNotas(true);
     toast('Notas marcadas como leídas');
   });
+  activarConfirmaciones();
+}
+
+/** El pie de cada nota: los botones para confirmar, o la constancia si ya se confirmó. */
+function confirmacionHTML(n) {
+  if (n.confirmada) {
+    const f = new Date(n.confirmada).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' });
+    return `<span class="pill good">${esc(n.confirmacion || '✓')} ${VER ? 'Confirmó' : 'Confirmaste'} el ${f}</span>`;
+  }
+  if (VER) return '<span class="pill warning">⏳ Todavía no la confirmó</span>';
+  return `<button class="btn sm" data-gesto="👍">👍 Leído y entendido</button>
+          <button class="btn sm" data-gesto="✅">✅ Entendido, lo aplico</button>`;
+}
+
+function activarConfirmaciones() {
+  if (VER) return;   // mirando el panel de otra persona: es solo lectura
+  $$('#v-notas .confirmar [data-gesto]').forEach((b) => b.addEventListener('click', async () => {
+    const caja = b.closest('.confirmar');
+    const id = caja.dataset.nota;
+    $$('[data-gesto]', caja).forEach((x) => (x.disabled = true));
+    try {
+      const r = await api(`/api/notas/${id}/confirmar`, { method: 'POST', body: { gesto: b.dataset.gesto } });
+      const nota = NOTAS.find((n) => String(n.id) === String(id));
+      if (nota) { nota.confirmada = r.confirmada; nota.confirmacion = r.confirmacion; nota.leida = true; }
+      caja.innerHTML = confirmacionHTML(nota || { confirmada: r.confirmada, confirmacion: r.confirmacion });
+      caja.closest('.nota').classList.remove('nueva');
+      await cargarNotas(true);
+      toast('Confirmado — tu supervisora ya lo ve');
+    } catch (e) {
+      $$('[data-gesto]', caja).forEach((x) => (x.disabled = false));
+      toast(e.message, true);
+    }
+  }));
 }
 
 /* ================= PANEL ================= */
@@ -312,6 +362,8 @@ function ir(v) {
   $('#sidebar').classList.remove('abierta');
   if (v === 'notas') pintarNotas();
   if (v === 'equipo') pintarEquipo();
+  if (v === 'progreso') $('#v-progreso').innerHTML = progresoHTML(PROGRESO);
+  if (v === 'analisis') $('#v-analisis').innerHTML = analisisHTML(ANALISIS);
   if (v === 'ajustes') {
     $('#v-ajustes').innerHTML = panelAjustes(YO);
     activarAjustes(YO, pintarIdentidad);

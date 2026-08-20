@@ -148,3 +148,41 @@ CREATE INDEX IF NOT EXISTS idx_cargas_periodo ON cargas(periodo_id);
 CREATE INDEX IF NOT EXISTS idx_res_periodo ON resultados(periodo_id);
 CREATE INDEX IF NOT EXISTS idx_res_usuario ON resultados(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_notas_usuario ON notas(usuario_id, leida);
+
+/* =========================================================
+   Análisis escrito que viene en la planilla.
+   Se guarda tal cual lo escribió la supervisión; el sistema
+   no lo inventa, solo lo copia del archivo y lo reparte.
+   ========================================================= */
+CREATE TABLE IF NOT EXISTS analisis (
+  id         SERIAL PRIMARY KEY,
+  periodo_id INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  fortalezas TEXT NOT NULL DEFAULT '',
+  errores    TEXT NOT NULL DEFAULT '',
+  UNIQUE (periodo_id, usuario_id)
+);
+
+CREATE TABLE IF NOT EXISTS conclusiones (
+  id         SERIAL PRIMARY KEY,
+  periodo_id INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+  orden      INTEGER NOT NULL DEFAULT 0,
+  titulo     TEXT NOT NULL,
+  cuerpo     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_analisis_periodo ON analisis(periodo_id);
+CREATE INDEX IF NOT EXISTS idx_conclu_periodo ON conclusiones(periodo_id, orden);
+
+/* La supervisión no se evalúa por volumen: su trabajo es controlar al
+   equipo, no responder tantos chats. Se marca en el propio indicador. */
+ALTER TABLE metricas ADD COLUMN IF NOT EXISTS exime_supervision BOOLEAN NOT NULL DEFAULT FALSE;
+
+/* Margen del "cumplió pero al límite", en porcentaje sobre la meta. */
+INSERT INTO config (clave, valor) VALUES ('margen_limite', '5')
+  ON CONFLICT (clave) DO NOTHING;
+
+/* Confirmación de lectura: no alcanza con que la nota se haya abierto,
+   la persona confirma explícitamente que la leyó y la entendió. */
+ALTER TABLE notas ADD COLUMN IF NOT EXISTS confirmada  TIMESTAMPTZ;
+ALTER TABLE notas ADD COLUMN IF NOT EXISTS confirmacion TEXT NOT NULL DEFAULT '';

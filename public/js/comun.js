@@ -90,6 +90,133 @@ const PALETAS = [
 ];
 const muestraDe = (p) => (PALETAS.find(([v]) => v === p) || PALETAS[0]).slice(2);
 
+
+/* =========================================================
+   Progreso hacia la meta del mes.
+   Se usa igual en el panel de supervisión y en el del colaborador:
+   el servidor ya decide cuántas filas manda según los permisos.
+   ========================================================= */
+function progresoHTML(d) {
+  if (!d || !d.filas || !d.filas.length) {
+    return `<div class="card"><h2>Progreso por agente</h2>
+      <div class="vacio">Todavía no hay datos cargados en este periodo.</div></div>`;
+  }
+  const ind = d.indicador;
+  const meta = ind && ind.meta !== null && ind.meta !== undefined ? Number(ind.meta) : null;
+  const nf = (v) => (v === null || v === undefined ? '—' : Number(v).toLocaleString('es-PY', { maximumFractionDigits: 0 }));
+
+  const fila = (f) => `<tr class="${f.esMio ? 'yo' : ''}">
+      <td><div class="who">${avatarHTML(f)}<div>
+        <b>${esc(f.nombre)}</b>${f.esMio ? '<span class="pill lima" style="margin-left:7px">sos vos</span>' : ''}
+        <small>${esc(f.puesto || '')}</small></div></div></td>
+      <td class="num">${nf(f.valor)}</td>
+      <td class="num">${f.exento ? '<span class="pill gris">No aplica</span>' : `<b>${nf(f.faltan)}</b>`}</td>
+      <td class="nota-larga">${esc(f.nota)}</td>
+      ${(f.otros || []).map((o) => `<td class="num">${o.valor === null ? '—'
+        : `${nfmt(o.valor, o.decimales)} ${o.cumple === null ? ''
+          : o.cumple ? '<span style="color:var(--good)">✓</span>' : '<span style="color:var(--critical)">✕</span>'}`}</td>`).join('')}
+    </tr>`;
+
+  const otros = d.filas[0].otros || [];
+
+  let html = `<div class="card">
+    <h2>Progreso por agente · ${esc(d.periodo.etiqueta)}</h2>
+    <p class="sub">${meta !== null
+      ? `Cuánto lleva cada persona y cuánto le falta para la meta de ${nf(meta)} ${esc(ind.unidad || '')} del mes.`
+      : 'Cuánto lleva cada persona en el periodo.'}</p>
+    <div class="scroll"><div class="tabla-progreso"><table><thead><tr>
+      <th>Agente</th>
+      <th class="num">${esc(ind ? ind.nombre : 'Valor')}</th>
+      <th class="num">Faltan para<br>la meta</th>
+      <th>Nota</th>
+      ${otros.map((o) => `<th class="num" title="${esc(o.nombre)}">${esc(tituloCortoMet(o.nombre))}</th>`).join('')}
+    </tr></thead><tbody>${d.filas.map(fila).join('')}</tbody></table></div></div>`;
+
+  /* ---- el mes cerrado ---- */
+  if (d.mes && d.mes.filas.length) {
+    const fm = (f) => `<tr class="${f.esMio ? 'yo' : ''}">
+        <td><div class="who">${avatarHTML(f)}<div>
+          <b>${esc(f.nombre)}</b>${f.esMio ? '<span class="pill lima" style="margin-left:7px">sos vos</span>' : ''}
+          <small>${esc(f.puesto || '')}</small></div></div></td>
+        <td class="num">${nf(f.valor)}</td>
+        <td><span class="pill ${f.clase === 'ok' ? 'good' : f.clase === 'limite' ? 'warning' : f.clase === 'exento' ? 'gris' : 'critical'}">${esc(f.etiqueta || '—')}</span></td>
+        <td class="nota-larga"><span style="font-size:15px">${f.emoji || ''}</span> ${esc(f.texto || '')}</td>
+      </tr>`;
+    html += `<div class="franja-mes">🏁 Datos actualizados del mes
+        <span class="sub">— ${esc(d.mes.periodo.etiqueta)}</span></div>
+      <div class="scroll"><div class="tabla-progreso"><table><thead><tr>
+        <th>Agente</th><th class="num">Total del mes</th><th>Resultado</th><th>${d.completo ? 'Mensaje que le llega' : 'Tu mensaje'}</th>
+      </tr></thead><tbody>${d.mes.filas.map(fm).join('')}</tbody></table></div></div>`;
+  }
+
+  html += `<p class="sub" style="margin:16px 0 0">${d.completo
+    ? 'Vista completa del equipo. Cada colaborador ve únicamente su propia línea.'
+    : 'Solo ves tu propia línea: los resultados de tus compañeros son privados.'}</p></div>`;
+  return html;
+}
+
+/** Los títulos que vienen del Excel suelen ser larguísimos: se recortan en el encabezado. */
+const tituloCortoMet = (n) => String(n || '')
+  .replace(/\s+en\s+turno\b/i, '')
+  .replace(/\s+evaluad[oa]s?\b/i, '')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
+
+
+/* =========================================================
+   Fortalezas y errores del periodo.
+   El texto es el que escribió la supervisión en la planilla:
+   se muestra tal cual. Lo que cambia es el encabezado, que le
+   habla directamente a la persona cuando es su propia ficha.
+   ========================================================= */
+function analisisHTML(d) {
+  if (!d || !d.filas || !d.filas.length) {
+    return `<div class="card"><h2>Fortalezas y errores</h2>
+      <div class="vacio">Todavía no hay análisis cargado para este periodo.<br>
+        Se completa solo cuando la planilla trae la hoja <b>Fortalezas y Errores</b>.</div></div>`;
+  }
+
+  /* --- ficha personal: la propia, hablándole de vos --- */
+  const ficha = (f) => {
+    const primer = esc(String(f.nombre).split(' ')[0]);
+    return `<div class="card">
+      <h2>${primer}, así venís en ${esc(d.periodo.etiqueta)}</h2>
+      <p class="sub">Escrito por tu supervisión a partir de los números del periodo.</p>
+      <div class="analisis">
+        <div class="lado bien">
+          <div class="t">✓ Lo que estás haciendo bien</div>
+          <p>${f.fortalezas ? esc(f.fortalezas) : 'Sin observaciones cargadas para este periodo.'}</p>
+        </div>
+        <div class="lado corregir">
+          <div class="t">↗ ${primer}, esto es lo que tenés que corregir</div>
+          <p>${f.errores ? esc(f.errores) : 'Sin puntos a corregir para este periodo. Muy bien.'}</p>
+        </div>
+      </div>
+    </div>`;
+  };
+
+  if (!d.completo) return d.filas.map(ficha).join('');
+
+  /* --- vista de quien puede ver a todo el equipo --- */
+  const fila = (f) => `<tr class="${f.esMio ? 'yo' : ''}">
+      <td><div class="who">${avatarHTML(f)}<div>
+        <b>${esc(f.nombre)}</b>${f.esMio ? '<span class="pill lima" style="margin-left:7px">sos vos</span>' : ''}
+        <small>${esc(f.puesto || '')}</small></div></div></td>
+      <td class="celda-bien">${f.fortalezas ? esc(f.fortalezas) : '—'}</td>
+      <td class="celda-corregir">${f.errores ? esc(f.errores) : '—'}</td>
+    </tr>`;
+
+  const mia = d.filas.find((f) => f.esMio);
+  return `${mia ? ficha(mia) : ''}
+    <div class="card">
+      <h2>Fortalezas y errores del equipo · ${esc(d.periodo.etiqueta)}</h2>
+      <p class="sub">Vista completa. Cada colaborador ve únicamente su propia ficha, redactada hacia él.</p>
+      <div class="scroll"><div class="tabla-analisis"><table><thead><tr>
+        <th>Agente</th><th>Fortalezas</th><th>Errores a corregir</th>
+      </tr></thead><tbody>${d.filas.map(fila).join('')}</tbody></table></div></div>
+    </div>`;
+}
+
 /** ¿Esta persona puede hacer tal cosa? La gerencia siempre puede. */
 const puede = (yo, clave) => !!yo && (yo.rol === 'gerente' || (yo.permisos || []).includes(clave));
 

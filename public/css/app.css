@@ -607,6 +607,85 @@ tr.editor td{background:var(--surface-2)}
 [data-palette="lavanda"] .podio::after{
   background:radial-gradient(circle, rgba(195,232,46,.24) 0%, transparent 68%)}
 
+/* =========================================================
+   Progreso hacia la meta del mes
+   ========================================================= */
+.franja-mes{background:linear-gradient(135deg,var(--celebra) 0%,var(--celebra-alto) 100%);
+  color:var(--celebra-ink);border-radius:var(--radius-sm);padding:12px 16px;margin:24px 0 14px;
+  font-weight:800;font-size:13.5px;letter-spacing:.05em;text-transform:uppercase;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.franja-mes .sub{font-weight:600;text-transform:none;letter-spacing:0;font-size:12.5px;
+  color:rgba(34,48,10,.8);margin:0}
+
+/* Los títulos largos bajan de renglón, los números nunca se parten,
+   y el texto largo se acomoda dentro de su celda sin desbordar. */
+.tabla-progreso th{white-space:normal;line-height:1.25;max-width:118px;vertical-align:bottom}
+.tabla-progreso th:first-child{max-width:none}
+.tabla-progreso th, .tabla-progreso td{padding:11px 8px;vertical-align:middle}
+.tabla-progreso td.num{white-space:nowrap}
+.tabla-progreso .who b{white-space:nowrap}
+.tabla-progreso .who small{white-space:nowrap}
+.tabla-progreso td.nota-larga{font-size:13px;color:var(--ink-2);line-height:1.45;
+  min-width:230px;max-width:400px;white-space:normal}
+.tabla-progreso tr.yo td{background:var(--primary-suave)}
+.tabla-progreso tr.yo td:first-child{box-shadow:inset 3px 0 0 var(--primary)}
+
+/* Ninguna celda debe empujar la tabla por una palabra larga */
+td, th{overflow-wrap:break-word}
+
+/* =========================================================
+   Fortalezas y errores
+   ========================================================= */
+.analisis{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.analisis .lado{border-radius:var(--radius-sm);padding:16px 18px;border:1px solid}
+.analisis .lado .t{font-weight:750;font-size:13.5px;margin-bottom:7px;line-height:1.3}
+.analisis .lado p{margin:0;font-size:14px;line-height:1.55;overflow-wrap:break-word}
+.analisis .bien{background:var(--good-bg);border-color:color-mix(in srgb, var(--good) 35%, transparent);color:var(--good-ink)}
+.analisis .corregir{background:var(--critical-bg);border-color:color-mix(in srgb, var(--critical) 35%, transparent);color:var(--critical-ink)}
+
+.tabla-analisis th, .tabla-analisis td{padding:12px 10px;vertical-align:top}
+.tabla-analisis .who b{white-space:nowrap}
+.tabla-analisis td.celda-bien, .tabla-analisis td.celda-corregir{
+  font-size:13px;line-height:1.5;min-width:230px;max-width:390px;white-space:normal}
+.tabla-analisis td.celda-bien{color:var(--good-ink);background:var(--good-bg)}
+.tabla-analisis td.celda-corregir{color:var(--critical-ink);background:var(--critical-bg)}
+.tabla-analisis tr.yo td:first-child{box-shadow:inset 3px 0 0 var(--primary)}
+
+/* =========================================================
+   Conclusiones para Gerencia
+   ========================================================= */
+.conclusion{border:1px solid var(--border);border-left:5px solid var(--primary);
+  border-radius:var(--radius-sm);padding:15px 17px;margin-bottom:12px;background:var(--surface-2)}
+.conclusion .t{font-weight:750;font-size:14.5px;line-height:1.35;margin-bottom:5px;overflow-wrap:break-word}
+.conclusion .c{font-size:13.5px;color:var(--ink-2);line-height:1.55;overflow-wrap:break-word}
+.conclusion input, .conclusion textarea{width:100%;margin-bottom:8px}
+.conclusion textarea{min-height:70px}
+.conclusion .acciones{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+/* Barra de guardado: aparece cuando hay cambios sin aplicar */
+.barra-guardar{position:sticky;bottom:0;background:var(--surface);border-top:2px solid var(--primary);
+  padding:13px 16px;margin:18px -22px -22px;border-radius:0 0 var(--radius) var(--radius);
+  display:flex;align-items:center;gap:11px;flex-wrap:wrap;z-index:5}
+.barra-guardar .pendiente{font-size:13px;color:var(--warning-ink);background:var(--warning-bg);
+  border:1px solid var(--warning);border-radius:20px;padding:4px 12px;font-weight:600}
+
+/* En vista previa, lo que escribe queda deshabilitado: es solo lectura */
+body.modo-preview .card input:not([type=checkbox]),
+body.modo-preview .card textarea,
+body.modo-preview .card select:not(#eqPeriodo):not(#prPeriodo):not(#anPeriodo):not(#cnPeriodo):not(#dsPeriodo):not(#periodo){
+  opacity:.6;pointer-events:none}
+body.modo-preview .btn.primary, body.modo-preview .btn.danger{opacity:.5;pointer-events:none}
+#avisoPreview{border-width:2px}
+
+/* Notas enviadas: quién las confirmó */
+.tabla-notas th, .tabla-notas td{padding:11px 9px;vertical-align:middle}
+.tabla-notas .who b{white-space:nowrap}
+.tabla-notas td.celda-nota{font-size:13px;line-height:1.5;min-width:220px;max-width:400px;white-space:normal}
+.tabla-notas td:last-child{white-space:nowrap}
+
+/* Pie de cada nota, con los botones de confirmación */
+.nota .confirmar{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap;align-items:center}
+
 /* En la tabla del equipo, la fila de quien está mirando queda resaltada */
 #eqTabla tr.yo td{background:var(--primary-suave)}
 #eqTabla tr.yo td:first-child{box-shadow:inset 3px 0 0 var(--primary)}

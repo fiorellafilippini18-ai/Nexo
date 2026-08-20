@@ -114,7 +114,11 @@ export function brecha(valor, metrica) {
  * @param {Object} valores  { metrica_id: valor }
  * @param {Object} promedios { metrica_id: promedio del equipo }
  */
-export function evaluar(metricas, valores, promedios = {}) {
+export function evaluar(metricas, valores, promedios = {}, persona = null) {
+  // A la supervisión no se le evalúan los indicadores marcados como
+  // "no aplica a supervisión" (el volumen, típicamente).
+  const exento = (m) => !!m.exime_supervision && persona && persona.rol === 'supervisor';
+
   const detalle = metricas.map((m) => {
     const valor = valores[m.id] ?? null;
     const ok = cumple(valor, m);
@@ -132,7 +136,8 @@ export function evaluar(metricas, valores, promedios = {}) {
           : `${mag.toFixed(0)}% ${mejor ? 'mejor' : 'peor'} que el promedio del equipo`
       };
     }
-    return { ...m, valor, cumple: ok, avance: av, brecha: br, promedioEquipo: prom, vsEquipo };
+    return { ...m, valor, cumple: exento(m) ? null : ok, exento: exento(m),
+             avance: av, brecha: exento(m) ? null : br, promedioEquipo: prom, vsEquipo };
   });
 
   const principales = detalle.filter((d) => d.principal && d.cumple !== null);

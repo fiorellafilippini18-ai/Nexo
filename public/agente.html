@@ -22,7 +22,9 @@
     <nav class="nav" id="nav">
       <div class="grupo">Mi trabajo</div>
       <button data-v="panel" class="on"><span class="ic">◧</span>Mis resultados</button>
+      <button data-v="progreso"><span class="ic">◕</span>Mi progreso del mes</button>
       <button data-v="equipo"><span class="ic">◨</span>Resultados del equipo</button>
+      <button data-v="analisis"><span class="ic">◆</span>Fortalezas y errores</button>
       <button data-v="detalle"><span class="ic">▤</span>Detalle por criterio</button>
       <button data-v="evolucion"><span class="ic">◔</span>Mi evolución</button>
       <button data-v="notas"><span class="ic">✉</span>Notas del supervisor<span class="badge rojo oculto" id="bNotas">0</span></button>
@@ -59,11 +61,19 @@
           igual que lo ve esa persona en su pantalla. Es solo lectura: nada de lo que hagas acá la afecta.</span>
         <a class="btn sm" href="/admin?v=equipo">← Volver a Equipo</a>
       </div>
+      <div id="avisoPreview" class="aviso info oculto" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <span style="font-size:20px">👁</span>
+        <span style="flex:1;min-width:220px">Estás viendo el sistema como <b id="pvNombre">—</b>,
+          con sus permisos y sus secciones. Es solo lectura: nada de lo que hagas acá se guarda.</span>
+        <a class="btn sm" href="/admin?v=invitados" id="pvSalir">← Volver a mi panel</a>
+      </div>
       <div id="avisoClave" class="aviso warn oculto">
         Estás usando la contraseña provisoria. Cambiala en <b>Ajustes → Mi perfil</b>.
       </div>
       <section class="vista on" id="v-panel"></section>
+      <section class="vista" id="v-progreso"></section>
       <section class="vista" id="v-equipo"></section>
+      <section class="vista" id="v-analisis"></section>
       <section class="vista" id="v-detalle"></section>
       <section class="vista" id="v-evolucion"></section>
       <section class="vista" id="v-notas"></section>

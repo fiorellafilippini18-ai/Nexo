@@ -196,11 +196,136 @@ const CONSEJOS = {
 export function sugerir(titulo, valores) {
   const clave = claveIndicador(titulo);
   const menor = /(tiempo|espera|demora|abandono|reclamo|error|rechazo|escalad)/i.test(titulo);
-  const base = { direccion: menor ? 'menor' : 'mayor', meta: null, unidad: '', decimales: 1, principal: false, consejo: (clave && CONSEJOS[clave]) || '' };
-  if (clave === 'chats')   return { ...base, meta: 800,  unidad: 'chats', decimales: 0, principal: true };
+  const base = { direccion: menor ? 'menor' : 'mayor', meta: null, unidad: '', decimales: 1, principal: false, exime_supervision: false, consejo: (clave && CONSEJOS[clave]) || '' };
+  // El volumen no se le exige a la supervisión: su rol es controlar, no responder.
+  if (clave === 'chats')   return { ...base, meta: 1200, unidad: 'chats', decimales: 0, principal: true, exime_supervision: true };
   if (clave === 'calidad') return { ...base, meta: 7,    unidad: 'puntos', decimales: 2, principal: true };
   if (clave === 'tiempo')  return { ...base, direccion: 'menor', meta: 35, unidad: 'min', decimales: 1, principal: true };
   const nums = valores.filter((v) => v !== null);
   if (nums.length && Math.max(...nums) <= 10) return { ...base, meta: 7, unidad: 'puntos', decimales: 2 };
   return base;
+}
+
+/* =========================================================
+   Periodo: la planilla dice de qué fechas habla, así que no
+   hace falta elegirlo a mano.
+   ========================================================= */
+const MESES_N = ['enero','febrero','marzo','abril','mayo','junio','julio',
+                 'agosto','septiembre','setiembre','octubre','noviembre','diciembre'];
+const MES_INDICE = (m) => {
+  const i = MESES_N.indexOf(normTxt(m));
+  return i < 0 ? null : (i >= 9 ? i - 1 : i); // "setiembre" es el mismo mes que "septiembre"
+};
+const dosDig = (n) => String(n).padStart(2, '0');
+
+/** Busca en las primeras filas de cada hoja una frase con fechas y la interpreta. */
+export function detectarPeriodo(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const lineas = [];
+  for (const nombre of wb.SheetNames) {
+    const ws = wb.Sheets[nombre];
+    if (!ws) continue;
+    const m = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: null, raw: false });
+    for (const fila of m.slice(0, 6)) {
+      for (const celda of (fila || [])) {
+        const s = String(celda ?? '').trim();
+        if (s.length > 8) lineas.push(s);
+      }
+    }
+  }
+
+  const mesesRe = MESES_N.join('|');
+  for (const linea of lineas) {
+    const t = normTxt(linea);
+
+    // "del 1 al 15 de agosto de 2026"  /  "1 al 15 de agosto 2026"
+    let m = t.match(new RegExp(`(\\d{1,2})\\s*(?:al|a|-|hasta)\\s*(\\d{1,2})\\s*de\\s*(${mesesRe})\\s*(?:de\\s*)?(\\d{4})`));
+    if (m) {
+      const [, d1, d2, mes, anio] = m;
+      const mi = MES_INDICE(mes);
+      if (mi === null) continue;
+      const fin = new Date(Number(anio), mi + 1, 0).getDate();
+      const desde = `${anio}-${dosDig(mi + 1)}-${dosDig(d1)}`;
+      const hasta = `${anio}-${dosDig(mi + 1)}-${dosDig(d2)}`;
+      const cubreMes = Number(d1) <= 1 && Number(d2) >= fin;
+      if (cubreMes) {
+        return { tipo: 'mensual', desde, hasta,
+                 etiqueta: `${MESES_N[mi]} ${anio}`, texto: linea };
+      }
+      const segunda = Number(d1) >= 16;
+      return { tipo: 'quincenal', desde, hasta, quincena: segunda ? 2 : 1,
+               etiqueta: `${segunda ? '2ª' : '1ª'} quincena de ${MESES_N[mi]} ${anio}`, texto: linea };
+    }
+
+    // "mes de agosto de 2026" / "agosto 2026" — solo si no dice quincena
+    m = t.match(new RegExp(`(?:mes\\s*de\\s*)?(${mesesRe})\\s*(?:de\\s*)?(\\d{4})`));
+    if (m && !/quincen/.test(t)) {
+      const mi = MES_INDICE(m[1]);
+      if (mi === null) continue;
+      const fin = new Date(Number(m[2]), mi + 1, 0).getDate();
+      return { tipo: 'mensual',
+               desde: `${m[2]}-${dosDig(mi + 1)}-01`,
+               hasta: `${m[2]}-${dosDig(mi + 1)}-${dosDig(fin)}`,
+               etiqueta: `${MESES_N[mi]} ${m[2]}`, texto: linea };
+    }
+  }
+  return null;
+}
+
+/* =========================================================
+   Texto de análisis que la planilla ya trae escrito.
+   No se inventa nada: se copia lo que dice el archivo.
+   ========================================================= */
+
+/** Hoja "Fortalezas y Errores": una fila por persona, con dos columnas de texto. */
+export function leerFortalezas(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer' });
+  const nombre = wb.SheetNames.find((h) => /fortalez/i.test(normTxt(h)));
+  if (!nombre) return [];
+  const m = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, blankrows: true, defval: null, raw: false });
+
+  let cab = -1, cAg = 0, cFor = 1, cErr = 2;
+  for (let i = 0; i < Math.min(m.length, 12); i++) {
+    const fila = (m[i] || []).map((c) => normTxt(String(c ?? '')));
+    const iAg = fila.findIndex((c) => /^agente|^asesor|^colaborador|^persona/.test(c));
+    const iFo = fila.findIndex((c) => /fortalez/.test(c));
+    const iEr = fila.findIndex((c) => /error|corregir|mejorar/.test(c));
+    if (iAg >= 0 && iFo >= 0) { cab = i; cAg = iAg; cFor = iFo; cErr = iEr >= 0 ? iEr : iFo + 1; break; }
+  }
+  if (cab < 0) return [];
+
+  const out = [];
+  for (let i = cab + 1; i < m.length; i++) {
+    const f = m[i] || [];
+    const persona = String(f[cAg] ?? '').trim();
+    if (!persona) { if (out.length) break; else continue; }
+    if (RE_TOTAL.test(persona)) continue;
+    out.push({
+      persona,
+      fortalezas: String(f[cFor] ?? '').trim(),
+      errores: String(f[cErr] ?? '').trim()
+    });
+  }
+  return out;
+}
+
+/** Hoja "Conclusiones": títulos numerados y, debajo, su explicación. */
+export function leerConclusiones(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer' });
+  const nombre = wb.SheetNames.find((h) => /conclusi|recomendac|gerenc/i.test(normTxt(h)));
+  if (!nombre) return [];
+  const m = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, blankrows: true, defval: null, raw: false });
+
+  const lineas = m.map((f) => (f || []).map((c) => String(c ?? '').trim()).find((s) => s) || '');
+  const out = [];
+  for (const linea of lineas) {
+    if (!linea) continue;
+    if (/^\d+[\.\)]\s*\S/.test(linea)) {
+      out.push({ titulo: linea.replace(/^\d+[\.\)]\s*/, '').trim(), cuerpo: '' });
+    } else if (out.length) {
+      const u = out[out.length - 1];
+      u.cuerpo = u.cuerpo ? `${u.cuerpo} ${linea}` : linea;
+    }
+  }
+  return out.filter((c) => c.titulo);
 }

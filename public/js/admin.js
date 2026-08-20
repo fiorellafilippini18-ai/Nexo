@@ -5,6 +5,9 @@ let EDITANDO = null, CATALOGO = [];
 const TITULOS = {
   cargar:      ['Cargar planilla', 'Subí el Excel del periodo'],
   equipo:      ['Equipo', 'Resultados de todo el equipo'],
+  progreso:    ['Progreso del mes', 'Cuánto le falta a cada uno para la meta'],
+  analisis:    ['Fortalezas y errores', 'Lo que cada persona hace bien y lo que debe corregir'],
+  conclusiones:['Conclusiones', 'Recomendaciones para Gerencia'],
   destacados:  ['Destacados', 'Podio del periodo y registro histórico'],
   notas:       ['Notas al equipo', 'Mensajes en el perfil de cada persona'],
   personas:    ['Colaboradores', 'Alta y gestión del equipo'],
@@ -23,8 +26,20 @@ async function iniciar() {
   Presencia.iniciar(YO, () => pintarIdentidad());
   montarMenuUsuario($('#pie'), { alAjustes: () => ir('ajustes') });
 
+  // Vista previa: mirar el sistema como otra persona
+  if (YO.preview) {
+    document.body.classList.add('modo-preview');
+    $('#pvNombre').textContent = YO.preview.nombre;
+    $('#avisoPreview').classList.remove('oculto');
+    $('#pvSalir').addEventListener('click', async () => {
+      await api('/api/vista-previa', { method: 'POST', body: { usuarioId: null } });
+      location.href = '/admin?v=invitados';
+    });
+  }
+
   // La barra lateral se arma con lo que cada persona tiene permitido
   const REQUIERE = { cargar: 'cargar', equipo: 'ver_equipo', destacados: 'ver_equipo',
+                     progreso: 'ver_equipo', analisis: 'analisis_equipo', conclusiones: 'conclusiones',
                      notas: 'notas', personas: 'personas', invitados: 'personas',
                      indicadores: 'indicadores', periodos: 'periodos' };
   Object.entries(REQUIERE).forEach(([vista, permiso]) => {
@@ -68,7 +83,7 @@ async function recargar() {
   PERIODOS = pe; METRICAS = me; USUARIOS = us; CATALOGO = pm.catalogo || [];
   const opts = PERIODOS.filter((p) => !p.archivado)
     .map((p) => `<option value="${p.id}">${esc(p.etiqueta)}${p.publicado ? '' : ' (sin publicar)'}</option>`).join('');
-  ['#perSel', '#eqPeriodo', '#dsPeriodo'].forEach((s) => { const el = $(s), v = el.value; el.innerHTML = opts; if (v) el.value = v; });
+  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo'].forEach((s) => { const el = $(s), v = el.value; el.innerHTML = opts; if (v) el.value = v; });
   const opUsuarios = USUARIOS.filter((u) => u.activo && u.rol === 'agente').map((u) => `<option value="${u.id}">${esc(u.nombre)}</option>`).join('');
   ['#coUsuario', '#ntUsuario'].forEach((s) => { const el = $(s), v = el.value; el.innerHTML = opUsuarios; if (v) el.value = v; });
   const fv = $('#ntFiltro').value;
@@ -91,7 +106,11 @@ function ir(v) {
   $('#sidebar').classList.remove('abierta');
   if (v === 'ajustes') { $('#v-ajustes').innerHTML = panelAjustes(YO); activarAjustes(YO, pintarIdentidad); }
   if (v === 'destacados') cargarDestacados();
+  if (v === 'progreso') cargarProgreso();
+  if (v === 'analisis') cargarAnalisis();
+  if (v === 'conclusiones') cargarConclusiones();
   if (v === 'invitados') pintarInvitados();
+  if (v === 'notas') cargarNotasAdmin();   // para ver al toque quién confirmó
 }
 $('#nav').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) ir(b.dataset.v); });
 $('#btnMenu').addEventListener('click', () => $('#sidebar').classList.toggle('abierta'));
@@ -146,7 +165,8 @@ file.addEventListener('change', (e) => subir(e.target.files[0]));
 
 async function subir(f) {
   if (!f) return;
-  if (!$('#perSel').value) return toast('Primero elegí o creá un periodo', true);
+  // Ya no hace falta elegir el periodo antes: la planilla dice de qué fechas
+  // habla, y en la revisión se ofrece crearlo con un clic.
   $('#subErr').classList.add('oculto');
   $('#dropTxt').innerHTML = 'Leyendo <b>' + esc(f.name) + '</b>…';
   const fd = new FormData(); fd.append('archivo', f);
@@ -160,6 +180,38 @@ async function subir(f) {
     $('#dropTxt').innerHTML = '<b>Arrastrá el archivo acá</b><br><span style="font-size:13.5px">o hacé clic para elegirlo</span>';
     $('#subErr').textContent = e.message; $('#subErr').classList.remove('oculto');
   }
+}
+
+/** La planilla dice de qué fechas habla: lo mostramos antes de guardar nada. */
+function avisoPeriodo() {
+  const p = ANALISIS && ANALISIS.periodoDetectado;
+  if (!p) return '';
+  const elegido = PERIODOS.find((x) => String(x.id) === String($('#perSel').value));
+  // Tienen que coincidir las dos fechas: la quincena y el mes empiezan el
+  // mismo día, y cargar el mes dentro de la quincena arruinaría el periodo.
+  const coincide = !!elegido
+    && String(elegido.desde).slice(0, 10) === p.desde
+    && String(elegido.hasta).slice(0, 10) === p.hasta;
+  const dias = `${p.desde.split('-').reverse().join('/')} al ${p.hasta.split('-').reverse().join('/')}`;
+  return `<div class="aviso ${coincide ? 'ok' : 'info'}">
+    <b>Detecté un periodo ${p.tipo}: ${esc(p.etiqueta)}.</b><br>
+    <span style="font-size:13.5px">Las fechas del archivo van del ${dias}.
+      ${coincide ? 'Coincide con el periodo elegido arriba.'
+        : `${elegido ? `El periodo elegido arriba es <b>${esc(elegido.etiqueta)}</b>.`
+                     : 'Todavía no elegiste ningún periodo.'}
+           <button class="btn sm" id="usarDetectado" style="margin-left:6px">Usar ${esc(p.etiqueta)}</button>`}</span>
+  </div>`;
+}
+
+/** Si el archivo trae el análisis escrito, avisamos que también se va a cargar. */
+function avisoExtras() {
+  const e = ANALISIS && ANALISIS.extras;
+  if (!e || (!e.fortalezas && !e.conclusiones)) return '';
+  const partes = [];
+  if (e.fortalezas) partes.push(`<b>fortalezas y errores</b> de ${e.fortalezas} persona(s)`);
+  if (e.conclusiones) partes.push(`<b>${e.conclusiones} conclusiones</b> para Gerencia`);
+  return `<div class="aviso info">La planilla también trae ${partes.join(' y ')}.
+    Se cargan tal cual están escritas: las fortalezas le llegan a cada persona y las conclusiones quedan solo para quien tenga permiso.</div>`;
 }
 
 /* ---------------- pantalla de revisión ---------------- */
@@ -178,6 +230,8 @@ function pintarRevision() {
       <select id="selHoja">${ANALISIS.hojas.map((h) => `<option value="${esc(h.hoja)}"${h.hoja === HOJA.hoja ? ' selected' : ''}>${esc(h.hoja)} — ${h.filas.length} personas, ${h.columnas.filter((c) => c.numerica).length} indicadores</option>`).join('')}</select>
     </div>` : ''}
 
+    ${avisoPeriodo()}
+    ${avisoExtras()}
     ${sinMapear ? `<div class="aviso warn">Hay <b>${sinMapear}</b> nombre(s) de la planilla que no reconozco. Asignalos abajo o quedarán fuera de la carga.</div>` : `<div class="aviso ok">Reconocí a las ${HOJA.personasMapeadas.length} personas de la planilla.</div>`}
 
     <h3 style="margin-top:22px">Personas</h3>
@@ -221,6 +275,21 @@ function pintarRevision() {
   const sh = $('#selHoja');
   if (sh) sh.addEventListener('change', (e) => { HOJA = ANALISIS.hojas.find((h) => h.hoja === e.target.value); pintarRevision(); });
 
+  // "Usar el periodo que detecté": lo crea si no existe y lo deja elegido
+  const ud = $('#usarDetectado');
+  if (ud) ud.addEventListener('click', async () => {
+    const p = ANALISIS.periodoDetectado;
+    let ya = PERIODOS.find((x) => String(x.desde).slice(0, 10) === p.desde && String(x.hasta).slice(0, 10) === p.hasta);
+    try {
+      if (!ya) ya = await api('/api/periodos', { method: 'POST',
+        body: { etiqueta: p.etiqueta, desde: p.desde, hasta: p.hasta, tipo: p.tipo } });
+      await recargar();
+      $('#perSel').value = ya.id;
+      pintarRevision();
+      toast('Periodo: ' + p.etiqueta);
+    } catch (err) { toast(err.message, true); }
+  });
+
   $$('#p3 [data-persona]').forEach((s) => s.addEventListener('change', (e) => {
     HOJA.personasMapeadas[+e.target.dataset.persona].usuarioId = e.target.value ? +e.target.value : null;
   }));
@@ -247,6 +316,9 @@ function pintarRevision() {
 }
 
 async function importar() {
+  if (!$('#perSel').value) {
+    return toast('Primero elegí el periodo, o usá el que detecté arriba', true);
+  }
   const btn = $('#btnImportar'); btn.disabled = true; btn.textContent = 'Cargando…';
   try {
     const r = await api('/api/importar', {
@@ -351,6 +423,112 @@ $('#coGuardar').addEventListener('click', async () => {
   } catch (e) { toast(e.message, true); }
 });
 
+/* ---------------- progreso hacia la meta ---------------- */
+async function cargarProgreso() {
+  const id = $('#prPeriodo').value;
+  if (!id) { $('#prCaja').innerHTML = '<div class="card"><div class="vacio">Todavía no hay periodos.</div></div>'; return; }
+  try {
+    $('#prCaja').innerHTML = progresoHTML(await api('/api/progreso/' + id));
+  } catch (e) {
+    $('#prCaja').innerHTML = `<div class="card"><div class="aviso err">${esc(e.message)}</div></div>`;
+  }
+}
+$('#prPeriodo').addEventListener('change', cargarProgreso);
+
+/* ---------------- fortalezas y errores ---------------- */
+async function cargarAnalisis() {
+  const id = $('#anPeriodo').value;
+  if (!id) { $('#anCaja').innerHTML = '<div class="card"><div class="vacio">Todavía no hay periodos.</div></div>'; return; }
+  try { $('#anCaja').innerHTML = analisisHTML(await api('/api/analisis/' + id)); }
+  catch (e) { $('#anCaja').innerHTML = `<div class="card"><div class="aviso err">${esc(e.message)}</div></div>`; }
+}
+const anSel = $('#anPeriodo'); if (anSel) anSel.addEventListener('change', cargarAnalisis);
+
+/* ---------------- conclusiones para Gerencia ---------------- */
+let CONCLU = [], CONCLU_ORIG = '';
+
+async function cargarConclusiones() {
+  const id = $('#cnPeriodo').value;
+  if (!id) { $('#cnCaja').innerHTML = '<div class="card"><div class="vacio">Todavía no hay periodos.</div></div>'; return; }
+  try {
+    const d = await api('/api/conclusiones/' + id);
+    CONCLU = d.filas.map((f) => ({ titulo: f.titulo, cuerpo: f.cuerpo }));
+    CONCLU_ORIG = JSON.stringify(CONCLU);
+    pintarConclusiones();
+  } catch (e) {
+    $('#cnCaja').innerHTML = `<div class="card"><div class="aviso err">${esc(e.message)}</div></div>`;
+  }
+}
+const cnSel = $('#cnPeriodo'); if (cnSel) cnSel.addEventListener('change', cargarConclusiones);
+
+const conclusionesCambiaron = () => JSON.stringify(CONCLU) !== CONCLU_ORIG;
+
+function pintarConclusiones() {
+  const cambios = conclusionesCambiaron();
+  $('#cnCaja').innerHTML = `<div class="card">
+    <div class="flex">
+      <div><h2 style="margin:0">${CONCLU.length} conclusión(es) de ${esc($('#cnPeriodo').selectedOptions[0]?.textContent || '')}</h2>
+        <p class="sub" style="margin:3px 0 0">Vienen de la hoja <b>Conclusiones</b> de la planilla. Podés editarlas, agregar o quitar.</p></div>
+      <div class="sp"></div>
+      <button class="btn" id="cnAgregar">＋ Agregar conclusión</button>
+    </div>
+    <div style="margin-top:18px">
+      ${CONCLU.length ? CONCLU.map((c, i) => `<div class="conclusion">
+        <input data-cn="${i}" data-k="titulo" value="${esc(c.titulo)}" placeholder="Título de la conclusión">
+        <textarea data-cn="${i}" data-k="cuerpo" placeholder="Explicación">${esc(c.cuerpo)}</textarea>
+        <div class="acciones">
+          <button class="btn sm" data-subir="${i}" ${i === 0 ? 'disabled' : ''}>↑ Subir</button>
+          <button class="btn sm" data-bajar="${i}" ${i === CONCLU.length - 1 ? 'disabled' : ''}>↓ Bajar</button>
+          <div class="sp"></div>
+          <button class="btn sm danger" data-quitar="${i}">Quitar</button>
+        </div>
+      </div>`).join('')
+      : '<div class="vacio">Todavía no hay conclusiones cargadas para este periodo.</div>'}
+    </div>
+    <div class="barra-guardar">
+      ${cambios ? '<span class="pendiente">Hay cambios sin guardar</span>' : '<span class="sub" style="margin:0">Todo guardado.</span>'}
+      <div class="sp"></div>
+      <button class="btn" id="cnDescartar" ${cambios ? '' : 'disabled'}>Descartar cambios</button>
+      <button class="btn primary" id="cnGuardar" ${cambios ? '' : 'disabled'}>Guardar conclusiones</button>
+    </div>
+  </div>`;
+  activarConclusiones();
+}
+
+function activarConclusiones() {
+  $$('#cnCaja [data-cn]').forEach((el) => el.addEventListener('input', () => {
+    CONCLU[+el.dataset.cn][el.dataset.k] = el.value;
+    const b = $('#cnCaja .barra-guardar');
+    if (b && !b.querySelector('.pendiente')) {
+      b.insertAdjacentHTML('afterbegin', '<span class="pendiente">Hay cambios sin guardar</span>');
+      b.querySelector('.sub')?.remove();
+      $('#cnGuardar').disabled = false; $('#cnDescartar').disabled = false;
+    }
+  }));
+  const mover = (de, a) => { const [x] = CONCLU.splice(de, 1); CONCLU.splice(a, 0, x); pintarConclusiones(); };
+  $$('#cnCaja [data-subir]').forEach((b) => b.addEventListener('click', () => mover(+b.dataset.subir, +b.dataset.subir - 1)));
+  $$('#cnCaja [data-bajar]').forEach((b) => b.addEventListener('click', () => mover(+b.dataset.bajar, +b.dataset.bajar + 1)));
+  $$('#cnCaja [data-quitar]').forEach((b) => b.addEventListener('click', () => {
+    CONCLU.splice(+b.dataset.quitar, 1); pintarConclusiones();
+  }));
+  $('#cnAgregar')?.addEventListener('click', () => { CONCLU.push({ titulo: '', cuerpo: '' }); pintarConclusiones(); });
+  $('#cnDescartar')?.addEventListener('click', () => {
+    CONCLU = JSON.parse(CONCLU_ORIG); pintarConclusiones(); toast('Cambios descartados');
+  });
+  $('#cnGuardar')?.addEventListener('click', async () => {
+    const btn = $('#cnGuardar'); btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/conclusiones/' + $('#cnPeriodo').value, { method: 'PUT', body: { filas: CONCLU } });
+      CONCLU_ORIG = JSON.stringify(CONCLU);
+      pintarConclusiones();
+      toast(`✓ Guardado: ${r.guardadas} conclusión(es)`);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Guardar conclusiones';
+      toast(e.message, true);
+    }
+  });
+}
+
 /* ---------------- destacados ---------------- */
 let PALMARES = null;
 
@@ -413,21 +591,29 @@ async function cargarNotasAdmin() {
   const uid = $('#ntFiltro').value;
   let lista = [];
   try {
-    if (uid) lista = (await api('/api/notas?usuarioId=' + uid)).map((n) => ({ ...n, para: (USUARIOS.find((u) => u.id === Number(uid)) || {}).nombre }));
-    else {
-      const agentes = USUARIOS.filter((u) => u.rol === 'agente' && u.activo);
-      const todas = await Promise.all(agentes.map((u) => api('/api/notas?usuarioId=' + u.id).then((ns) => ns.map((n) => ({ ...n, para: u.nombre })))));
-      lista = todas.flat().sort((a, b) => (a.creada < b.creada ? 1 : -1)).slice(0, 40);
-    }
+    lista = await api('/api/notas/enviadas');
+    if (uid) lista = lista.filter((n) => String(n.usuario_id) === String(uid));
   } catch (e) { return; }
+
   const iconos = { nota: '📝', felicitacion: '🎉', atencion: '⚠️' };
+  const fecha = (f) => new Date(f).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' });
+  const sinConfirmar = lista.filter((n) => !n.confirmada).length;
+
   $('#ntLista').innerHTML = lista.length
-    ? lista.map((n) => `<div class="nota">
-        <div style="font-size:14.5px">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</div>
-        <div class="meta">Para <b>${esc(n.para)}</b> · ${new Date(n.creada).toLocaleString('es-PY', { dateStyle: 'medium', timeStyle: 'short' })}
-          · ${n.leida ? 'leída' : '<b style="color:var(--primary)">sin leer</b>'}
-          <button class="btn sm danger" style="float:right" data-deln="${n.id}">Borrar</button></div>
-      </div>`).join('')
+    ? `${sinConfirmar ? `<div class="aviso warn">Hay <b>${sinConfirmar}</b> nota(s) que todavía nadie confirmó.</div>` : ''}
+      <div class="scroll"><div class="tabla-notas"><table><thead><tr>
+        <th>Para</th><th>Nota</th><th>Enviada</th><th>Confirmación</th><th></th>
+      </tr></thead><tbody>
+      ${lista.map((n) => `<tr>
+        <td><div class="who">${avatarHTML(n)}<div><b>${esc(n.nombre)}</b><small>${esc(n.puesto || '')}</small></div></div></td>
+        <td class="celda-nota">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</td>
+        <td style="font-size:12.5px;color:var(--ink-2);white-space:nowrap">${fecha(n.creada)}</td>
+        <td>${n.confirmada
+          ? `<span class="pill good">${esc(n.confirmacion || '✓')} ${fecha(n.confirmada)}</span>`
+          : '<span class="pill warning">⏳ Sin confirmar</span>'}</td>
+        <td style="text-align:right"><button class="btn sm danger" data-deln="${n.id}">Borrar</button></td>
+      </tr>`).join('')}
+      </tbody></table></div></div>`
     : '<div class="vacio">Todavía no enviaste notas.</div>';
 }
 $('#ntFiltro').addEventListener('change', cargarNotasAdmin);
@@ -479,7 +665,10 @@ function pintarUsuarios() {
       <td class="num">${u.registros}</td>
       <td style="font-size:12.5px;color:var(--muted);max-width:210px">${(u.alias || []).map(esc).join(' · ') || '—'}</td>
       <td><div class="acciones">
-        ${!puede(YO, 'personas') ? '' : `<button class="btn sm" data-editar="${u.id}">Editar</button>
+        ${!puede(YO, 'personas') ? '' : `
+        ${u.activo && u.rol !== 'gerente' && u.id !== YO.id
+          ? `<button class="btn sm" data-vercomo="${u.id}" title="Ver el sistema tal como lo ve esta persona">👁 Ver su panel</button>` : ''}
+        <button class="btn sm" data-editar="${u.id}">Editar</button>
         ${u.id === YO.id ? '<span class="tag-baja">sos vos</span>'
           : u.activo
             ? `<button class="btn sm danger" data-baja="${u.id}">Eliminar</button>`
@@ -518,7 +707,9 @@ function pintarInvitados() {
           ? `<div class="permiso-lista">${u.permisos.map((k) => `<span class="pill gris">${esc(nombrePermiso(k))}</span>`).join('')}</div>`
           : '<small style="color:var(--muted)">Solo entra: no ve resultados de nadie</small>'}</td>
       <td><div class="acciones">
-        ${!puede(YO, 'personas') ? '' : `<button class="btn sm" data-editar="${u.id}">Editar</button>
+        ${!puede(YO, 'personas') ? '' : `
+        ${u.activo ? `<button class="btn sm" data-vercomo="${u.id}" title="Ver el sistema tal como lo ve esta persona">👁 Ver su panel</button>` : ''}
+        <button class="btn sm" data-editar="${u.id}">Editar</button>
         ${u.activo
           ? `<button class="btn sm danger" data-baja="${u.id}">Quitar acceso</button>`
           : `<button class="btn sm" data-alta="${u.id}">Reactivar</button>`}`}
@@ -589,10 +780,12 @@ function abrirEditor(id) {
       <div class="aviso info" style="margin-top:18px">La gerencia tiene todos los permisos, siempre.
         No se le pueden quitar: es el perfil que reparte los permisos del resto.</div>` : ''}
 
-    <div class="flex" style="margin-top:15px">
-      <button class="btn primary" id="edGuardar">Guardar cambios</button>
-      <button class="btn" id="edCerrar">Cancelar</button>
+    <div class="barra-guardar" style="margin:18px 0 0;border-radius:var(--radius-sm)">
+      <span class="pendiente oculto" id="edPendiente">Hay cambios sin guardar</span>
+      <span class="sub" id="edSinCambios" style="margin:0">Sin cambios por ahora.</span>
       <div class="sp"></div>
+      <button class="btn" id="edCerrar">Descartar cambios</button>
+      <button class="btn primary" id="edGuardar">Guardar cambios</button>
       ${YO.rol === 'gerente' && u.rol === 'supervisor' && u.activo
         ? `<button class="btn sm" id="edGerencia">Traspasar la gerencia</button>` : ''}
       ${u.registros ? `<button class="btn sm danger" id="edBorrar">Borrar definitivamente</button>` : ''}
@@ -603,7 +796,22 @@ function abrirEditor(id) {
   </td>`;
   fila.after(tr);
 
-  $('#edCerrar').addEventListener('click', () => { EDITANDO = null; tr.remove(); });
+  // Cualquier cambio en el editor enciende el aviso de "sin guardar"
+  const marcarCambio = () => {
+    $('#edPendiente')?.classList.remove('oculto');
+    $('#edSinCambios')?.classList.add('oculto');
+  };
+  $$('input, select, textarea', tr).forEach((el) => {
+    el.addEventListener('input', marcarCambio);
+    el.addEventListener('change', marcarCambio);
+  });
+
+  $('#edCerrar').addEventListener('click', () => {
+    const hayCambios = !$('#edPendiente')?.classList.contains('oculto');
+    if (hayCambios && !confirm('Tenés cambios sin guardar.\n\n¿Descartarlos?')) return;
+    EDITANDO = null; tr.remove();
+    if (hayCambios) toast('Cambios descartados');
+  });
   $('#edGuardar').addEventListener('click', async () => {
     const err = $('#edErr'); err.classList.add('oculto');
     try {
@@ -620,7 +828,10 @@ function abrirEditor(id) {
           body: { permisos: cajas.filter((c) => c.checked).map((c) => c.dataset.permiso) } });
       }
       EDITANDO = null;
-      toast('Perfil actualizado');
+      const cuantos = cajas.length ? cajas.filter((c) => c.checked).length : null;
+      toast(cuantos === null
+        ? `✓ Guardado: los datos de ${u.nombre} quedaron actualizados`
+        : `✓ Guardado: ${u.nombre} quedó con ${cuantos} permiso(s)`);
       recargar();
     } catch (e) { err.textContent = e.message; err.classList.remove('oculto'); }
   });
@@ -646,6 +857,15 @@ function abrirEditor(id) {
 
 const accionesDeFila = async (e) => {
   const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.vercomo) {
+    const u = USUARIOS.find((x) => x.id === Number(b.dataset.vercomo));
+    try {
+      await api('/api/vista-previa', { method: 'POST', body: { usuarioId: Number(b.dataset.vercomo) } });
+      // Los agentes tienen su propio panel; el resto usa este mismo
+      location.href = u && u.rol === 'agente' ? '/mi-panel' : '/admin';
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
   if (b.dataset.editar) {
     const id = Number(b.dataset.editar);
     if (EDITANDO === id) { EDITANDO = null; $$('tr.editor').forEach((t) => t.remove()); }
@@ -672,7 +892,9 @@ $('#invTabla').addEventListener('click', accionesDeFila);
 function pintarMetricas() {
   $('#mtTabla').innerHTML = `<table><thead><tr>
     <th>Indicador</th><th>Mejor cuando es</th><th class="num">Meta</th><th>Unidad</th>
-    <th style="text-align:center">Principal</th><th>Consejo para el agente</th><th></th></tr></thead><tbody>
+    <th style="text-align:center">Principal</th>
+    <th style="text-align:center" title="La supervisión no se evalúa con este indicador">No aplica a<br>supervisión</th>
+    <th>Consejo para el agente</th><th></th></tr></thead><tbody>
     ${METRICAS.map((m) => `<tr>
       <td><input data-m="${m.id}" data-k="nombre" value="${esc(m.nombre)}" style="min-width:190px"></td>
       <td><select data-m="${m.id}" data-k="direccion">
@@ -681,6 +903,7 @@ function pintarMetricas() {
       <td><input type="number" step="0.01" data-m="${m.id}" data-k="meta" value="${m.meta ?? ''}" style="min-width:85px;text-align:right"></td>
       <td><input data-m="${m.id}" data-k="unidad" value="${esc(m.unidad || '')}" style="min-width:70px"></td>
       <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-k="principal" ${m.principal ? 'checked' : ''} style="width:17px;height:17px"></td>
+      <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-k="exime_supervision" ${m.exime_supervision ? 'checked' : ''} style="width:17px;height:17px"></td>
       <td><input data-m="${m.id}" data-k="consejo" value="${esc(m.consejo || '')}" placeholder="Qué hacer para mejorarlo" style="min-width:260px"></td>
       <td style="text-align:right"><button class="btn sm danger" data-delm="${m.id}">Quitar</button></td>
     </tr>`).join('')}</tbody></table>`;

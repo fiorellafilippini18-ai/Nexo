@@ -10,8 +10,9 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { pool, q, one, all, migrate, norm } from './src/db.js';
-import { analizar, sugerir, claveIndicador, normTxt } from './src/parse.js';
-import { evaluar, destacados, ESCALA } from './src/score.js';
+import { analizar, sugerir, claveIndicador, normTxt,
+         detectarPeriodo, leerFortalezas, leerConclusiones } from './src/parse.js';
+import { evaluar, destacados, cumple, ESCALA } from './src/score.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -65,6 +66,8 @@ export const PERMISOS = [
   ['personas',    'Dar de alta, editar y dar de baja colaboradores'],
   ['indicadores', 'Cambiar metas, indicadores y consejos'],
   ['notas',       'Enviar notas a los colaboradores'],
+  ['analisis_equipo', 'Ver las fortalezas y errores de todo el equipo'],
+  ['conclusiones',    'Ver las conclusiones y recomendaciones para Gerencia'],
   ['marca',       'Cambiar el nombre y el aspecto de la plataforma']
 ];
 const CLAVES = PERMISOS.map(([k]) => k);
@@ -89,6 +92,27 @@ const cargarUsuario = async (req, res, next) => {
     }
     req.usuario = u;
     req.permisos = permisosDe(u);
+    req.uid = u.id;
+    req.real = u;
+
+    /* Vista previa: mirar el sistema con los ojos de otra persona.
+       Solo puede activarla quien administra colaboradores, y es de
+       SOLO LECTURA: cualquier operación que escriba queda bloqueada. */
+    if (req.session.preview && req.permisos.includes('personas')) {
+      const v = await one('SELECT id, nombre, rol, permisos, activo FROM usuarios WHERE id=$1',
+        [req.session.preview]);
+      if (v && v.activo && v.rol !== 'gerente') {
+        req.usuario = v;
+        req.permisos = permisosDe(v);
+        req.uid = v.id;
+        req.preview = v;
+        if (req.method !== 'GET' && !/^\/api\/vista-previa/.test(req.path)) {
+          return res.status(403).json({ error: 'Estás en vista previa: es solo lectura' });
+        }
+      } else {
+        delete req.session.preview;
+      }
+    }
     next();
   } catch (e) { next(e); }
 };
@@ -155,11 +179,41 @@ app.get('/api/conectados', pedirLogin, pedirGestion, async (req, res) => {
   })));
 });
 
+/* ---------------------------------------------------------------
+   Vista previa: ver el sistema tal como lo ve otra persona.
+   Sirve sobre todo para los invitados, que entran al mismo panel
+   que la supervisión pero con menos secciones. Es de solo lectura.
+--------------------------------------------------------------- */
+app.post('/api/vista-previa', pedirLogin, async (req, res) => {
+  // Ojo: en vista previa los permisos son los de la otra persona, así que
+  // hay que mirar los reales para saber si puede entrar o salir.
+  const real = req.real || req.usuario;
+  const suyos = permisosDe(real);
+  if (!suyos.includes('personas')) {
+    return res.status(403).json({ error: 'No tenés permiso para esto' });
+  }
+  const id = Number(req.body.usuarioId) || null;
+  if (!id) { delete req.session.preview; return res.json({ ok: true, preview: null }); }
+
+  const u = await one('SELECT id, nombre, rol, activo FROM usuarios WHERE id=$1', [id]);
+  if (!u || !u.activo) return res.status(404).json({ error: 'Esa persona no existe o está dada de baja' });
+  if (u.rol === 'gerente') return res.status(400).json({ error: 'No se puede mirar el panel de la gerencia' });
+  if (u.id === real.id) return res.status(400).json({ error: 'Ese es tu propio panel' });
+
+  req.session.preview = u.id;
+  res.json({ ok: true, preview: { id: u.id, nombre: u.nombre, rol: u.rol } });
+});
+
 app.get('/api/yo', pedirLogin, async (req, res) => {
   const u = await one(`SELECT id, usuario, nombre, puesto, email, turno, rol, debe_cambiar,
                               avatar, tema, escala, sonido, presencia, paleta
-                       FROM usuarios WHERE id=$1`, [req.session.uid]);
-  res.json({ ...u, permisos: req.permisos, esGerente: u.rol === 'gerente', marca: await leerMarca() });
+                       FROM usuarios WHERE id=$1`, [req.uid]);
+  res.json({
+    ...u, permisos: req.permisos, esGerente: u.rol === 'gerente', marca: await leerMarca(),
+    // Si estoy mirando el sistema como otra persona, la pantalla lo tiene que decir
+    preview: req.preview ? { id: req.preview.id, nombre: req.preview.nombre, rol: req.preview.rol } : null,
+    real: req.preview ? { id: req.real.id, nombre: req.real.nombre } : null
+  });
 });
 
 /* --- Nombre de la plataforma --- */
@@ -259,8 +313,8 @@ app.put('/api/perfil/foto', pedirLogin, async (req, res) => {
 /* --- Notas en el perfil --- */
 app.get('/api/notas', pedirLogin, async (req, res) => {
   const puedeVerOtros = req.permisos.includes('ver_equipo');
-  const objetivo = puedeVerOtros && req.query.usuarioId ? Number(req.query.usuarioId) : req.session.uid;
-  if (objetivo !== req.session.uid && !puedeVerOtros) return res.status(403).json({ error: 'Sin permiso' });
+  const objetivo = puedeVerOtros && req.query.usuarioId ? Number(req.query.usuarioId) : req.uid;
+  if (objetivo !== req.uid && !puedeVerOtros) return res.status(403).json({ error: 'Sin permiso' });
   res.json(await all(
     `SELECT n.*, a.nombre AS autor FROM notas n LEFT JOIN usuarios a ON a.id=n.autor_id
      WHERE n.usuario_id=$1 ORDER BY n.creada DESC LIMIT 50`, [objetivo]));
@@ -277,6 +331,35 @@ app.post('/api/notas', pedirLogin, pedir('notas'), async (req, res) => {
 app.post('/api/notas/leidas', pedirLogin, async (req, res) => {
   await q('UPDATE notas SET leida=TRUE WHERE usuario_id=$1 AND NOT leida', [req.session.uid]);
   res.json({ ok: true });
+});
+
+/** El colaborador confirma que leyó y entendió la nota. Solo puede
+ *  confirmar las suyas, y una vez confirmada no se vuelve atrás sola. */
+app.post('/api/notas/:id/confirmar', pedirLogin, async (req, res) => {
+  const n = await one('SELECT * FROM notas WHERE id=$1', [req.params.id]);
+  if (!n) return res.status(404).json({ error: 'Esa nota no existe' });
+  if (n.usuario_id !== req.session.uid) {
+    return res.status(403).json({ error: 'Solo podés confirmar las notas de tu propio perfil' });
+  }
+  if (n.confirmada) return res.json({ ok: true, confirmada: n.confirmada, confirmacion: n.confirmacion });
+
+  const gesto = ['👍', '✅'].includes(req.body.gesto) ? req.body.gesto : '👍';
+  const r = await one(
+    'UPDATE notas SET confirmada=NOW(), confirmacion=$2, leida=TRUE WHERE id=$1 RETURNING confirmada, confirmacion',
+    [n.id, gesto]);
+  res.json({ ok: true, ...r });
+});
+
+/** Para la supervisión: todas las notas enviadas, con su confirmación. */
+app.get('/api/notas/enviadas', pedirLogin, pedir('notas'), async (req, res) => {
+  res.json(await all(
+    `SELECT n.id, n.texto, n.tipo, n.creada, n.leida, n.confirmada, n.confirmacion,
+            u.id AS usuario_id, u.nombre, u.puesto, u.avatar, u.activo,
+            a.nombre AS autor
+       FROM notas n
+       JOIN usuarios u ON u.id = n.usuario_id
+       LEFT JOIN usuarios a ON a.id = n.autor_id
+      ORDER BY n.creada DESC LIMIT 100`));
 });
 
 app.delete('/api/notas/:id', pedirLogin, pedir('notas'), async (req, res) => {
@@ -403,11 +486,13 @@ app.post('/api/metricas', pedirLogin, pedir('indicadores'), async (req, res) => 
 });
 
 app.put('/api/metricas/:id', pedirLogin, pedir('indicadores'), async (req, res) => {
-  const { unidad, direccion, meta, decimales, principal, consejo, orden, nombre } = req.body;
+  const { unidad, direccion, meta, decimales, principal, consejo, orden, nombre, exime_supervision } = req.body;
   await q(`UPDATE metricas SET nombre=COALESCE($1,nombre), unidad=COALESCE($2,unidad), direccion=COALESCE($3,direccion),
-           meta=$4, decimales=COALESCE($5,decimales), principal=COALESCE($6,principal), consejo=COALESCE($7,consejo), orden=COALESCE($8,orden)
+           meta=$4, decimales=COALESCE($5,decimales), principal=COALESCE($6,principal), consejo=COALESCE($7,consejo),
+           orden=COALESCE($8,orden), exime_supervision=COALESCE($10,exime_supervision)
            WHERE id=$9`,
-    [nombre, unidad, direccion, meta === '' ? null : meta, decimales, principal, consejo, orden, req.params.id]);
+    [nombre, unidad, direccion, meta === '' ? null : meta, decimales, principal, consejo, orden, req.params.id,
+     exime_supervision === undefined ? null : !!exime_supervision]);
   res.json({ ok: true });
 });
 
@@ -537,6 +622,17 @@ app.post('/api/analizar', pedirLogin, pedir('cargar'), upload.single('archivo'),
     });
   }
 
+  // La planilla dice de qué fechas habla y trae el análisis ya escrito:
+  // lo detectamos acá para mostrarlo antes de guardar nada.
+  info.periodoDetectado = detectarPeriodo(req.file.buffer);
+  const forta = leerFortalezas(req.file.buffer);
+  const conclu = leerConclusiones(req.file.buffer);
+  info.extras = {
+    fortalezas: forta.length,
+    conclusiones: conclu.length,
+    personasFortalezas: forta.map((f) => f.persona)
+  };
+
   // guardamos el archivo en la sesión para el paso 2
   req.session.pendiente = { nombre: req.file.originalname, b64: req.file.buffer.toString('base64') };
   res.json(info);
@@ -563,13 +659,14 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
     for (const c of columnas) {
       if (!c.usar) continue;
       const r = await cliente.query(
-        `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden, exime_supervision)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (nombre) DO UPDATE SET unidad=EXCLUDED.unidad, direccion=EXCLUDED.direccion,
            meta=EXCLUDED.meta, decimales=EXCLUDED.decimales, principal=EXCLUDED.principal, activa=TRUE
          RETURNING id`,
         [String(c.nombre).trim(), c.unidad || '', c.direccion === 'menor' ? 'menor' : 'mayor',
-         c.meta === '' || c.meta === undefined ? null : c.meta, c.decimales ?? 1, !!c.principal, c.consejo || '', c.orden ?? 0]);
+         c.meta === '' || c.meta === undefined ? null : c.meta, c.decimales ?? 1, !!c.principal, c.consejo || '', c.orden ?? 0,
+         !!c.exime_supervision]);
       mapaMetrica[c.titulo] = r.rows[0].id;
     }
 
@@ -600,7 +697,30 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
       }
     }
 
-    // 4. guardar el archivo original
+    // 4. el análisis escrito que ya viene en la planilla
+    const buf0 = Buffer.from(pend.b64, 'base64');
+    const forta = leerFortalezas(buf0);
+    for (const f of forta) {
+      const uid = mapaPersona[f.persona]
+        || Object.entries(mapaPersona).find(([texto]) => norm(texto) === norm(f.persona))?.[1];
+      if (!uid) continue;
+      await cliente.query(
+        `INSERT INTO analisis (periodo_id, usuario_id, fortalezas, errores) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (periodo_id, usuario_id)
+         DO UPDATE SET fortalezas=EXCLUDED.fortalezas, errores=EXCLUDED.errores`,
+        [periodoId, uid, f.fortalezas || '', f.errores || '']);
+    }
+    const conclu = leerConclusiones(buf0);
+    if (conclu.length) {
+      await cliente.query('DELETE FROM conclusiones WHERE periodo_id=$1', [periodoId]);
+      for (let i = 0; i < conclu.length; i++) {
+        await cliente.query(
+          'INSERT INTO conclusiones (periodo_id, orden, titulo, cuerpo) VALUES ($1,$2,$3,$4)',
+          [periodoId, i, conclu[i].titulo, conclu[i].cuerpo || '']);
+      }
+    }
+
+    // 5. guardar el archivo original
     await cliente.query('DELETE FROM archivos WHERE periodo_id=$1', [periodoId]);
     const buf = Buffer.from(pend.b64, 'base64');
     await cliente.query('INSERT INTO archivos (periodo_id, nombre, peso, contenido) VALUES ($1,$2,$3,$4)',
@@ -639,7 +759,7 @@ async function datosPeriodo(periodoId) {
   // Se incluye a quienes ya no están en el equipo: sus datos siguen contando
   // para el promedio del periodo, y se muestran como "Nombre (eliminada)".
   const filas = await all(
-    `SELECT r.usuario_id, r.metrica_id, r.valor, u.nombre, u.puesto, u.avatar, u.activo
+    `SELECT r.usuario_id, r.metrica_id, r.valor, u.nombre, u.puesto, u.avatar, u.activo, u.rol
      FROM resultados r JOIN usuarios u ON u.id=r.usuario_id
      WHERE r.periodo_id=$1`, [periodoId]);
 
@@ -647,7 +767,7 @@ async function datosPeriodo(periodoId) {
   for (const f of filas) {
     porUsuario[f.usuario_id] ||= {
       id: f.usuario_id, nombre: etiquetaNombre(f), puesto: f.puesto, avatar: f.avatar,
-      activo: f.activo, valores: {}
+      activo: f.activo, rol: f.rol, valores: {}
     };
     porUsuario[f.usuario_id].valores[f.metrica_id] = Number(f.valor);
   }
@@ -666,16 +786,16 @@ app.get('/api/mi-desempeno/:periodoId', pedirLogin, async (req, res) => {
   const gestion = req.permisos.includes('ver_equipo');
   if ((!per.publicado || per.archivado) && !gestion) return res.status(403).json({ error: 'Ese periodo no está disponible' });
 
-  const objetivo = req.permisos.includes('ver_equipo') && req.query.usuarioId ? Number(req.query.usuarioId) : req.session.uid;
+  const objetivo = req.permisos.includes('ver_equipo') && req.query.usuarioId ? Number(req.query.usuarioId) : req.uid;
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
   const yo = porUsuario[objetivo];
-  const evalu = evaluar(metricas, yo ? yo.valores : {}, promedios);
+  const evalu = evaluar(metricas, yo ? yo.valores : {}, promedios, yo);
 
   // Ranking silencioso: la posición sí, los nombres de los demás no.
   // Mismo criterio que el podio: indicadores cumplidos y, si empatan, avance promedio.
   const todos = Object.values(porUsuario)
     .map((u) => {
-      const ev = evaluar(metricas, u.valores, promedios);
+      const ev = evaluar(metricas, u.valores, promedios, u);
       const avs = ev.detalle.filter((x) => x.principal && x.avance !== null).map((x) => x.avance);
       return { id: u.id, r: ev.ratio, prom: avs.length ? avs.reduce((a, b) => a + b, 0) / avs.length : 0 };
     })
@@ -694,7 +814,7 @@ app.get('/api/mi-desempeno/:periodoId', pedirLogin, async (req, res) => {
     historial.push({
       periodo: a.etiqueta,
       valores: u ? u.valores : {},
-      ratio: u ? evaluar(d.metricas, u.valores, d.promedios).ratio : null
+      ratio: u ? evaluar(d.metricas, u.valores, d.promedios, u).ratio : null
     });
   }
 
@@ -780,11 +900,188 @@ app.get('/api/equipo/:periodoId', pedirLogin, async (req, res) => {
   }
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
   const filas = Object.values(porUsuario)
-    .map((u) => ({ ...u, ...evaluar(metricas, u.valores, promedios) }))
+    .map((u) => ({ ...u, ...evaluar(metricas, u.valores, promedios, u) }))
     .sort((a, b) => b.ratio - a.ratio);
   const resumen = {};
   for (const e of ESCALA) resumen[e.clave] = filas.filter((f) => f.nivel && f.nivel.clave === e.clave).length;
   res.json({ periodo: per, metricas, promedios, filas, resumen, escala: ESCALA });
+});
+
+/* ---------------------------------------------------------------
+   Progreso hacia la meta del mes.
+   En una quincena muestra cuánto lleva cada persona y cuánto le
+   falta. Cuando además existe el mes completo cargado, suma el
+   bloque "Datos actualizados del mes" con el mensaje que le toca.
+--------------------------------------------------------------- */
+
+/** El indicador de volumen: el que mide cantidad de chats atendidos. */
+function metricaVolumen(metricas) {
+  const principales = metricas.filter((m) => m.principal && m.direccion !== 'menor');
+  return principales.find((m) => claveIndicador(m.nombre) === 'chats')
+      || principales.find((m) => /chat|conversacion|atencion|ticket|caso/i.test(normTxt(m.nombre)))
+      || principales[0] || null;
+}
+
+const nf0 = (n) => Number(n).toLocaleString('es-PY', { maximumFractionDigits: 0 });
+
+/** Los tres mensajes de cierre de mes. */
+function mensajeDelMes(nombre, valor, meta, margen) {
+  const primer = String(nombre || '').split(' ')[0];
+  const v = Number(valor), m = Number(meta);
+  if (v < m) {
+    return { clase: 'no', etiqueta: 'No llegó', emoji: '💪',
+      texto: `${primer}, estuviste cerca: te faltaron ${nf0(m - v)} chats para la meta. Esforzate un poco más y conseguí mejores resultados en el periodo siguiente.` };
+  }
+  if (v < m * (1 + margen / 100)) {
+    return { clase: 'limite', etiqueta: 'Al límite', emoji: '👀',
+      texto: `${primer}, lograste el objetivo con ${nf0(v)} chats, pero estuviste muy cerca de fallar. Esforzate más en la siguiente etapa: no te quedes al límite.` };
+  }
+  return { clase: 'ok', etiqueta: 'Cumplió', emoji: '🥳',
+    texto: `${primer}, ¡felicitaciones! Alcanzaste la meta del mes con ${nf0(v)} chats. Seguí así.` };
+}
+
+app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
+  const v = await periodoVisible(req, req.params.periodoId);
+  if (v.error) return res.status(v.error).json({ error: v.msg });
+  const per = v.per;
+  const completo = req.permisos.includes('ver_equipo');
+
+  const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
+  const vol = metricaVolumen(metricas);
+  const otras = metricas.filter((m) => m.principal && m !== vol);
+
+  const visible = (u) => completo || u.id === req.uid;
+  const filas = Object.values(porUsuario).filter(visible).map((u) => {
+    const valor = vol ? u.valores[vol.id] ?? null : null;
+    const exento = vol && vol.exime_supervision && u.rol === 'supervisor';
+    const meta = vol && vol.meta !== null ? Number(vol.meta) : null;
+    const faltan = (valor === null || meta === null || exento) ? null : Math.max(0, meta - Number(valor));
+    const primer = String(u.nombre).split(' ')[0];
+    return {
+      usuarioId: u.id, nombre: u.nombre, puesto: u.puesto, avatar: u.avatar, rol: u.rol,
+      esMio: u.id === req.uid,
+      valor, faltan, exento,
+      nota: exento
+        ? `${primer} tiene rol de supervisión: su objetivo no es el volumen de chats, así que este indicador no se le exige.`
+        : (faltan === null ? ''
+          : faltan > 0
+            ? `${primer} respondió ${nf0(valor)} chats en el periodo; le faltan ${nf0(faltan)} para llegar a la meta de ${nf0(meta)}. ¡Seguí a este ritmo y lo lográs!`
+            : `${primer} ya superó la meta de ${nf0(meta)} chats con ${nf0(valor)}. Excelente.`),
+      otros: otras.map((m) => ({
+        id: m.id, nombre: m.nombre, unidad: m.unidad, decimales: m.decimales,
+        valor: u.valores[m.id] ?? null, cumple: cumple(u.valores[m.id] ?? null, m)
+      }))
+    };
+  }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+
+  /* ---- el mes completo, si ya está cargado ---- */
+  let mes = null;
+  const mensual = await one(
+    `SELECT * FROM periodos
+      WHERE tipo='mensual' AND archivado=FALSE
+        AND date_trunc('month', desde) = date_trunc('month', $1::date)
+        AND EXISTS (SELECT 1 FROM resultados r WHERE r.periodo_id = periodos.id)
+      ORDER BY publicado DESC, id DESC LIMIT 1`, [per.desde]);
+
+  if (mensual && (mensual.publicado || completo)) {
+    const cfg = await one("SELECT valor FROM config WHERE clave='margen_limite'");
+    const margen = Number(cfg?.valor) || 5;
+    const dm = await datosPeriodo(mensual.id);
+    const volM = metricaVolumen(dm.metricas);
+    const metaM = volM && volM.meta !== null ? Number(volM.meta) : null;
+
+    mes = {
+      periodo: mensual, meta: metaM, margen,
+      filas: Object.values(dm.porUsuario).filter(visible).map((u) => {
+        const valor = volM ? u.valores[volM.id] ?? null : null;
+        const exento = volM && volM.exime_supervision && u.rol === 'supervisor';
+        const m = (valor === null || metaM === null) ? null
+          : exento
+            ? { clase: 'exento', etiqueta: 'No aplica', emoji: '🛡',
+                texto: `${String(u.nombre).split(' ')[0]}, por tu rol de supervisión no se te mide el volumen de chats. Tu foco es acompañar al equipo.` }
+            : mensajeDelMes(u.nombre, valor, metaM, margen);
+        return {
+          usuarioId: u.id, nombre: u.nombre, puesto: u.puesto, avatar: u.avatar,
+          esMio: u.id === req.uid, valor, ...(m || {})
+        };
+      }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+    };
+  }
+
+  res.json({ periodo: per, completo, indicador: vol, filas, mes });
+});
+
+/* ---------------------------------------------------------------
+   Análisis del periodo: fortalezas y errores, y conclusiones.
+   Las fortalezas son privadas: cada quien ve la suya, salvo que
+   tenga permiso para ver las del equipo.
+--------------------------------------------------------------- */
+async function periodoVisible(req, id) {
+  const per = await one('SELECT * FROM periodos WHERE id=$1', [id]);
+  if (!per) return { error: 404, msg: 'Periodo inexistente' };
+  const gestion = req.permisos.includes('ver_equipo');
+  if ((!per.publicado || per.archivado) && !gestion) {
+    return { error: 403, msg: 'Ese periodo no está disponible' };
+  }
+  return { per };
+}
+
+app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
+  const v = await periodoVisible(req, req.params.periodoId);
+  if (v.error) return res.status(v.error).json({ error: v.msg });
+
+  // ¿ve el de todos, o solo el suyo?
+  const todos = req.permisos.includes('analisis_equipo');
+
+  // "Ver el panel de" — solo para quien puede mirar al equipo
+  const pedido = Number(req.query.usuarioId) || null;
+  const mirando = pedido && req.permisos.includes('ver_equipo') ? pedido : null;
+  const quien = mirando || req.uid;
+
+  const filas = await all(
+    `SELECT a.usuario_id, a.fortalezas, a.errores, u.nombre, u.puesto, u.avatar, u.activo
+       FROM analisis a JOIN usuarios u ON u.id = a.usuario_id
+      WHERE a.periodo_id = $1 ${todos && !mirando ? '' : 'AND a.usuario_id = $2'}
+      ORDER BY u.nombre`,
+    todos && !mirando ? [v.per.id] : [v.per.id, quien]);
+
+  res.json({
+    periodo: v.per,
+    completo: todos && !mirando,
+    filas: filas.map((f) => ({ ...f, nombre: etiquetaNombre(f), esMio: f.usuario_id === quien }))
+  });
+});
+
+app.get('/api/conclusiones/:periodoId', pedirLogin, pedir('conclusiones'), async (req, res) => {
+  const per = await one('SELECT * FROM periodos WHERE id=$1', [req.params.periodoId]);
+  if (!per) return res.status(404).json({ error: 'Periodo inexistente' });
+  const filas = await all(
+    'SELECT id, orden, titulo, cuerpo FROM conclusiones WHERE periodo_id=$1 ORDER BY orden, id',
+    [per.id]);
+  res.json({ periodo: per, filas });
+});
+
+app.put('/api/conclusiones/:periodoId', pedirLogin, pedir('conclusiones'), async (req, res) => {
+  const per = await one('SELECT * FROM periodos WHERE id=$1', [req.params.periodoId]);
+  if (!per) return res.status(404).json({ error: 'Periodo inexistente' });
+  const lista = Array.isArray(req.body.filas) ? req.body.filas : [];
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('BEGIN');
+    await cliente.query('DELETE FROM conclusiones WHERE periodo_id=$1', [per.id]);
+    for (let i = 0; i < lista.length; i++) {
+      const t = String(lista[i].titulo || '').trim();
+      if (!t) continue;
+      await cliente.query(
+        'INSERT INTO conclusiones (periodo_id, orden, titulo, cuerpo) VALUES ($1,$2,$3,$4)',
+        [per.id, i, t.slice(0, 300), String(lista[i].cuerpo || '').trim().slice(0, 2000)]);
+    }
+    await cliente.query('COMMIT');
+  } catch (e) {
+    await cliente.query('ROLLBACK');
+    return res.status(500).json({ error: e.message });
+  } finally { cliente.release(); }
+  res.json({ ok: true, guardadas: lista.length });
 });
 
 app.post('/api/comentario', pedirLogin, pedir('notas'), async (req, res) => {

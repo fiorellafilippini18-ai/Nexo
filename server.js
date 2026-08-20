@@ -312,7 +312,9 @@ app.put('/api/perfil/foto', pedirLogin, async (req, res) => {
 
 /* --- Notas en el perfil --- */
 app.get('/api/notas', pedirLogin, async (req, res) => {
-  const puedeVerOtros = req.permisos.includes('ver_equipo');
+  // Las notas son personales: para leer las de otra persona hace falta el permiso
+  // de notas, no alcanza con poder mirar los resultados del equipo.
+  const puedeVerOtros = req.permisos.includes('notas');
   const objetivo = puedeVerOtros && req.query.usuarioId ? Number(req.query.usuarioId) : req.uid;
   if (objetivo !== req.uid && !puedeVerOtros) return res.status(403).json({ error: 'Sin permiso' });
   res.json(await all(
@@ -1033,9 +1035,10 @@ app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
   // ¿ve el de todos, o solo el suyo?
   const todos = req.permisos.includes('analisis_equipo');
 
-  // "Ver el panel de" — solo para quien puede mirar al equipo
+  // "Ver el panel de" — las fortalezas y los errores de otra persona son privados:
+  // solo los abre quien tiene el permiso del análisis del equipo.
   const pedido = Number(req.query.usuarioId) || null;
-  const mirando = pedido && req.permisos.includes('ver_equipo') ? pedido : null;
+  const mirando = pedido && todos ? pedido : null;
   const quien = mirando || req.uid;
 
   const filas = await all(

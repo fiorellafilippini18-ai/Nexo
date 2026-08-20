@@ -611,6 +611,9 @@ const Presencia = {
   iniciar(usuario, alCambiar) {
     this.estado = usuario.presencia || 'disponible';
     this.alCambiar = alCambiar;
+    // En vista previa no se late: estoy mirando el panel de otra persona y no
+    // corresponde que figure conectada por algo que hice yo.
+    if (usuario.preview) { this.soloLectura = true; return; }
     this.latir();
     // un latido cada minuto mantiene el semáforo en verde
     this._timer = setInterval(() => this.latir(), 60000);
@@ -626,6 +629,7 @@ const Presencia = {
   },
 
   async cambiar(estado) {
+    if (this.soloLectura) return toast('Estás en vista previa: es solo lectura', true);
     await this.latir(estado);
     toast(estado === 'desconectado' ? 'Figurás como desconectada'
       : estado === 'ausente' ? 'Figurás como ausente' : 'Figurás como conectada');

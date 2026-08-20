@@ -75,25 +75,36 @@ function pintarIdentidad() {
  *  en la planilla. Supervisión cuenta; los invitados no, porque solo miran. */
 const esColaborador = (u) => !!u.activo && (u.rol === 'agente' || u.rol === 'supervisor');
 
+/* Quien entra con permisos recortados (o a quien estoy mirando en vista previa) no
+   tiene en pantalla todos los botones ni todas las secciones: cada escritura se hace
+   solo si el elemento existe, y cada consulta que su rol no permite se deja pasar. */
+const conTexto = (sel, valor) => { const el = $(sel); if (el) el.textContent = valor; };
+const llenarSelect = (sel, html) => {
+  const el = $(sel); if (!el) return;
+  const v = el.value; el.innerHTML = html; if (v) el.value = v;
+};
+
 async function recargar() {
+  const siPuede = (clave, url, vacio) => (puede(YO, clave) ? api(url).catch(() => vacio) : Promise.resolve(vacio));
   const [pe, me, us, pm] = await Promise.all([
-    api('/api/periodos?incluirArchivados=1'), api('/api/metricas'), api('/api/usuarios'),
+    api('/api/periodos?incluirArchivados=1').catch(() => []),
+    api('/api/metricas').catch(() => []),
+    siPuede('ver_equipo', '/api/usuarios', []),
     api('/api/permisos').catch(() => ({ catalogo: [] }))
   ]);
-  PERIODOS = pe; METRICAS = me; USUARIOS = us; CATALOGO = pm.catalogo || [];
+  PERIODOS = pe || []; METRICAS = me || []; USUARIOS = us || []; CATALOGO = (pm && pm.catalogo) || [];
   const opts = PERIODOS.filter((p) => !p.archivado)
     .map((p) => `<option value="${p.id}">${esc(p.etiqueta)}${p.publicado ? '' : ' (sin publicar)'}</option>`).join('');
-  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo'].forEach((s) => { const el = $(s), v = el.value; el.innerHTML = opts; if (v) el.value = v; });
+  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo'].forEach((s) => llenarSelect(s, opts));
   const opUsuarios = USUARIOS.filter((u) => u.activo && u.rol === 'agente').map((u) => `<option value="${u.id}">${esc(u.nombre)}</option>`).join('');
-  ['#coUsuario', '#ntUsuario'].forEach((s) => { const el = $(s), v = el.value; el.innerHTML = opUsuarios; if (v) el.value = v; });
-  const fv = $('#ntFiltro').value;
-  $('#ntFiltro').innerHTML = '<option value="">Todo el equipo</option>' + opUsuarios;
-  $('#ntFiltro').value = fv;
-  $('#bPersonas').textContent = USUARIOS.filter(esColaborador).length;
-  const bi = $('#bInvitados'); if (bi) bi.textContent = USUARIOS.filter((u) => u.activo && u.rol === 'invitado').length;
-  $('#bEquipo').textContent = PERIODOS.filter((p) => p.publicado && !p.archivado).length;
-  pintarUsuarios(); pintarInvitados(); pintarMetricas(); pintarPeriodos(); cargarNotasAdmin();
-  if (PERIODOS.length) cargarEquipo();
+  ['#coUsuario', '#ntUsuario'].forEach((s) => llenarSelect(s, opUsuarios));
+  llenarSelect('#ntFiltro', '<option value="">Todo el equipo</option>' + opUsuarios);
+  conTexto('#bPersonas', USUARIOS.filter(esColaborador).length);
+  conTexto('#bInvitados', USUARIOS.filter((u) => u.activo && u.rol === 'invitado').length);
+  conTexto('#bEquipo', PERIODOS.filter((p) => p.publicado && !p.archivado).length);
+  pintarUsuarios(); pintarInvitados(); pintarMetricas(); pintarPeriodos();
+  if (puede(YO, 'notas')) cargarNotasAdmin();
+  if (PERIODOS.length && puede(YO, 'ver_equipo')) cargarEquipo();
 }
 
 /* ---------------- navegación ---------------- */

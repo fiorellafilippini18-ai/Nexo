@@ -51,6 +51,8 @@ async function iniciar() {
     if (vacio) g.remove();
   });
   if (YO.rol !== 'gerente') { const o = $('#optSupervisor'); if (o) o.remove(); }
+  // Escribirle un comentario a alguien es una acción: quien solo mira no la ve.
+  if (!puede(YO, 'notas') || !puedeEditar(YO)) { const c = $('#cardComentario'); if (c) c.remove(); }
   // si la dirección trae ?v=equipo (por ejemplo al volver de ver el panel de alguien),
   // se abre esa sección en vez de la primera del menú
   const pedida = new URLSearchParams(location.search).get('v');
@@ -105,6 +107,7 @@ async function recargar() {
   pintarUsuarios(); pintarInvitados(); pintarMetricas(); pintarPeriodos();
   if (puede(YO, 'notas')) cargarNotasAdmin();
   if (PERIODOS.length && puede(YO, 'ver_equipo')) cargarEquipo();
+  contenidoDeLaVista(VISTA);   // la sección abierta ya tiene sus periodos: se refresca
 }
 
 /* ---------------- navegación ---------------- */
@@ -116,6 +119,12 @@ function ir(v) {
   $('#subVista').textContent = TITULOS[v][1];
   $('#sidebar').classList.remove('abierta');
   if (v === 'ajustes') { $('#v-ajustes').innerHTML = panelAjustes(YO); activarAjustes(YO, pintarIdentidad); }
+  contenidoDeLaVista(v);
+}
+
+/** Carga lo que muestra cada sección. Se llama al entrar y otra vez cuando llegan
+ *  los periodos, porque si no la sección que ya estaba abierta queda en blanco. */
+function contenidoDeLaVista(v) {
   if (v === 'destacados') cargarDestacados();
   if (v === 'progreso') cargarProgreso();
   if (v === 'analisis') cargarAnalisis();
@@ -427,7 +436,7 @@ async function cargarEquipo() {
     : '<div class="vacio">No hay datos cargados en este periodo.</div>';
 }
 
-$('#coGuardar').addEventListener('click', async () => {
+$('#coGuardar')?.addEventListener('click', async () => {
   try {
     await api('/api/comentario', { method: 'POST', body: { periodoId: Number($('#eqPeriodo').value), usuarioId: Number($('#coUsuario').value), texto: $('#coTexto').value } });
     toast('Comentario guardado');
@@ -476,9 +485,27 @@ const conclusionesCambiaron = () => JSON.stringify(CONCLU) !== CONCLU_ORIG;
 
 function pintarConclusiones() {
   const cambios = conclusionesCambiaron();
+  const titulo = `${CONCLU.length} conclusión(es) de ${esc($('#cnPeriodo').selectedOptions[0]?.textContent || '')}`;
+
+  // Quien entra solo a mirar las lee como texto: sin campos, sin botones, sin barra de guardar.
+  if (!puedeEditar(YO)) {
+    $('#cnCaja').innerHTML = `<div class="card">
+      <h2 style="margin:0">${titulo}</h2>
+      <p class="sub" style="margin:3px 0 0">Tu acceso es de solo lectura.</p>
+      <div style="margin-top:18px">
+        ${CONCLU.length ? CONCLU.map((c) => `<div class="conclusion leida">
+          <div class="t">${esc(c.titulo)}</div>
+          ${c.cuerpo ? `<p>${esc(c.cuerpo)}</p>` : ''}
+        </div>`).join('')
+        : '<div class="vacio">Todavía no hay conclusiones cargadas para este periodo.</div>'}
+      </div>
+    </div>`;
+    return;
+  }
+
   $('#cnCaja').innerHTML = `<div class="card">
     <div class="flex">
-      <div><h2 style="margin:0">${CONCLU.length} conclusión(es) de ${esc($('#cnPeriodo').selectedOptions[0]?.textContent || '')}</h2>
+      <div><h2 style="margin:0">${titulo}</h2>
         <p class="sub" style="margin:3px 0 0">Vienen de la hoja <b>Conclusiones</b> de la planilla. Podés editarlas, agregar o quitar.</p></div>
       <div class="sp"></div>
       <button class="btn" id="cnAgregar">＋ Agregar conclusión</button>

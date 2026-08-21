@@ -220,6 +220,9 @@ function analisisHTML(d) {
 /** ¿Esta persona puede hacer tal cosa? La gerencia siempre puede. */
 const puede = (yo, clave) => !!yo && (yo.rol === 'gerente' || (yo.permisos || []).includes(clave));
 
+/** Un invitado entra a mirar: sin el permiso "editar" no ve campos ni botones de guardar. */
+const puedeEditar = (yo) => !!yo && (yo.rol !== 'invitado' || (yo.permisos || []).includes('editar'));
+
 /* =========================================================
    Apariencia: modo claro/oscuro y tamaño de texto
    ========================================================= */

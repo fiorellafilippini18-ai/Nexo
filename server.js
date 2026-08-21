@@ -502,12 +502,16 @@ app.post('/api/metricas', pedirLogin, pedir('indicadores'), async (req, res) => 
 
 app.put('/api/metricas/:id', pedirLogin, pedir('indicadores'), async (req, res) => {
   const { unidad, direccion, meta, decimales, principal, consejo, orden, nombre, exime_supervision } = req.body;
+  /* La pantalla de indicadores manda de a un campo por vez. La meta solo se toca
+     si vino en el pedido: si no, cambiar la unidad o una casilla borraba la meta. */
+  const tocaMeta = Object.prototype.hasOwnProperty.call(req.body, 'meta');
   await q(`UPDATE metricas SET nombre=COALESCE($1,nombre), unidad=COALESCE($2,unidad), direccion=COALESCE($3,direccion),
-           meta=$4, decimales=COALESCE($5,decimales), principal=COALESCE($6,principal), consejo=COALESCE($7,consejo),
+           meta=CASE WHEN $11 THEN $4::numeric ELSE meta END,
+           decimales=COALESCE($5,decimales), principal=COALESCE($6,principal), consejo=COALESCE($7,consejo),
            orden=COALESCE($8,orden), exime_supervision=COALESCE($10,exime_supervision)
            WHERE id=$9`,
     [nombre, unidad, direccion, meta === '' ? null : meta, decimales, principal, consejo, orden, req.params.id,
-     exime_supervision === undefined ? null : !!exime_supervision]);
+     exime_supervision === undefined ? null : !!exime_supervision, tocaMeta]);
   res.json({ ok: true });
 });
 
@@ -1043,16 +1047,19 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
   const filas = Object.values(porUsuario).filter(visible).map((u) => {
     const valor = vol ? u.valores[vol.id] ?? null : null;
     const exento = vol && vol.exime_supervision && u.rol === 'supervisor';
-    const meta = vol && vol.meta !== null ? Number(vol.meta) : null;
+    const meta = vol && vol.meta !== null && vol.meta !== undefined ? Number(vol.meta) : null;
+    const sinMeta = !!vol && meta === null;
     const faltan = (valor === null || meta === null || exento) ? null : Math.max(0, meta - Number(valor));
     const primer = String(u.nombre).split(' ')[0];
     return {
       usuarioId: u.id, nombre: u.nombre, puesto: u.puesto, avatar: u.avatar, rol: u.rol,
       esMio: u.id === req.uid,
-      valor, faltan, exento,
+      valor, faltan, exento, sinMeta,
       nota: exento
         ? `${primer} tiene rol de supervisión: su objetivo no es el volumen de chats, así que este indicador no se le exige.`
-        : (faltan === null ? ''
+        : (sinMeta && completo
+          ? `Este periodo no tiene meta de ${String(vol.nombre).toLowerCase()} definida, así que no se puede calcular cuánto falta. Se carga en Periodos → Metas de este periodo.`
+          : faltan === null ? ''
           : faltan > 0
             ? `${primer} respondió ${nf0(valor)} chats en el periodo; le faltan ${nf0(faltan)} para llegar a la meta de ${nf0(meta)}. ¡Seguí a este ritmo y lo lográs!`
             : `${primer} ya superó la meta de ${nf0(meta)} chats con ${nf0(valor)}. Excelente.`),

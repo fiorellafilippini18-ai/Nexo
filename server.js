@@ -68,16 +68,23 @@ export const PERMISOS = [
   ['notas',       'Enviar notas a los colaboradores'],
   ['analisis_equipo', 'Ver las fortalezas y errores de todo el equipo'],
   ['conclusiones',    'Ver las conclusiones y recomendaciones para Gerencia'],
+  ['editar',      'Editar y guardar cambios (si no, solo mira)'],
   ['marca',       'Cambiar el nombre y el aspecto de la plataforma']
 ];
 const CLAVES = PERMISOS.map(([k]) => k);
 
 const PRESETS = {
   gerente:    CLAVES,
-  supervisor: ['ver_equipo', 'cargar', 'periodos', 'notas'],
-  invitado:   ['ver_equipo'],
+  supervisor: ['ver_equipo', 'cargar', 'periodos', 'notas', 'editar'],
+  invitado:   ['ver_equipo'],   // entra a mirar: sin "editar" no guarda nada
   agente:     []
 };
+
+/* Un invitado entra a mirar. Sin el permiso "editar" no puede guardar nada,
+   salvo lo que es suyo: su perfil, su apariencia y su contraseña. */
+const DE_UNO_MISMO = /^\/api\/(logout|presencia|perfil|perfil\/foto|preferencias|clave|notas\/leidas|notas\/\d+\/confirmar)$/;
+const soloMira = (req) =>
+  !!req.usuario && req.usuario.rol === 'invitado' && !req.permisos.includes('editar');
 
 const permisosDe = (u) =>
   !u ? [] : u.rol === 'gerente' ? CLAVES : (Array.isArray(u.permisos) ? u.permisos.filter((p) => CLAVES.includes(p)) : []);
@@ -112,6 +119,12 @@ const cargarUsuario = async (req, res, next) => {
       } else {
         delete req.session.preview;
       }
+    }
+
+    /* Invitado sin permiso de edición: puede recorrer todo lo que tenga habilitado,
+       pero no guardar. Lo suyo propio (perfil, apariencia, contraseña) sí. */
+    if (req.method !== 'GET' && !req.preview && soloMira(req) && !DE_UNO_MISMO.test(req.path)) {
+      return res.status(403).json({ error: 'Tu acceso es de solo lectura: no podés guardar cambios' });
     }
     next();
   } catch (e) { next(e); }

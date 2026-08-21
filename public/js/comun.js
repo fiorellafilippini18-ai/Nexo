@@ -110,7 +110,9 @@ function progresoHTML(d) {
         <b>${esc(f.nombre)}</b>${f.esMio ? '<span class="pill lima" style="margin-left:7px">sos vos</span>' : ''}
         <small>${esc(f.puesto || '')}</small></div></div></td>
       <td class="num">${nf(f.valor)}</td>
-      <td class="num">${f.exento ? '<span class="pill gris">No aplica</span>' : `<b>${nf(f.faltan)}</b>`}</td>
+      <td class="num">${f.exento ? '<span class="pill gris">No aplica</span>'
+        : f.sinMeta ? '<span class="pill warning" title="Cargala en Periodos → Metas de este periodo">Sin meta</span>'
+        : `<b>${nf(f.faltan)}</b>`}</td>
       <td class="nota-larga">${esc(f.nota)}</td>
       ${(f.otros || []).map((o) => `<td class="num">${o.valor === null ? '—'
         : `${nfmt(o.valor, o.decimales)} ${o.cumple === null ? ''

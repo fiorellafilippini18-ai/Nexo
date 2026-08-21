@@ -583,8 +583,8 @@ function podioHTML(d, miId) {
       <div class="quien">
         <div class="rol">Mejor asesor del periodo</div>
         <div class="nom">${esc(d.general.nombre)}</div>
-        <div class="det">${esc(d.general.puesto || 'Agente')} · cumplió los ${d.general.total} indicadores principales
-          con un ${Math.round(d.general.promedio)}% de avance promedio</div>
+        <div class="det">${esc(d.general.puesto || 'Agente')} · ganó ${d.general.mvps} de los ${d.general.principales || d.general.total} indicadores principales
+          · cumplió ${d.general.cumplidos} de ${d.general.total} metas · ${Math.round(d.general.promedio)}% de avance promedio</div>
       </div>
     </div>`;
   }

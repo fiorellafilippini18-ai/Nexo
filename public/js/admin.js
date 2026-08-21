@@ -53,6 +53,8 @@ async function iniciar() {
   if (YO.rol !== 'gerente') { const o = $('#optSupervisor'); if (o) o.remove(); }
   // Escribirle un comentario a alguien es una acción: quien solo mira no la ve.
   if (!puede(YO, 'notas') || !puedeEditar(YO)) { const c = $('#cardComentario'); if (c) c.remove(); }
+  // Las metas del periodo se tocan desde Indicadores: sin ese permiso, ni se muestran.
+  if (!puede(YO, 'indicadores')) { const c = $('#mtpCaja')?.closest('.card'); if (c) c.remove(); }
   // si la dirección trae ?v=equipo (por ejemplo al volver de ver el panel de alguien),
   // se abre esa sección en vez de la primera del menú
   const pedida = new URLSearchParams(location.search).get('v');
@@ -97,7 +99,7 @@ async function recargar() {
   PERIODOS = pe || []; METRICAS = me || []; USUARIOS = us || []; CATALOGO = (pm && pm.catalogo) || [];
   const opts = PERIODOS.filter((p) => !p.archivado)
     .map((p) => `<option value="${p.id}">${esc(p.etiqueta)}${p.publicado ? '' : ' (sin publicar)'}</option>`).join('');
-  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo'].forEach((s) => llenarSelect(s, opts));
+  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo', '#mtPeriodo'].forEach((s) => llenarSelect(s, opts));
   const opUsuarios = USUARIOS.filter((u) => u.activo && u.rol === 'agente').map((u) => `<option value="${u.id}">${esc(u.nombre)}</option>`).join('');
   ['#coUsuario', '#ntUsuario'].forEach((s) => llenarSelect(s, opUsuarios));
   llenarSelect('#ntFiltro', '<option value="">Todo el equipo</option>' + opUsuarios);
@@ -130,6 +132,7 @@ function contenidoDeLaVista(v) {
   if (v === 'analisis') cargarAnalisis();
   if (v === 'conclusiones') cargarConclusiones();
   if (v === 'invitados') pintarInvitados();
+  if (v === 'periodos') cargarMetasPeriodo();
   if (v === 'notas') cargarNotasAdmin();   // para ver al toque quién confirmó
 }
 $('#nav').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) ir(b.dataset.v); });
@@ -974,6 +977,85 @@ $('#mCrear').addEventListener('click', async () => {
 });
 
 /* ---------------- periodos ---------------- */
+/* ---------------- metas de cada periodo ----------------
+   El umbral de chats no es el mismo todos los meses: en julio eran 800 y desde
+   agosto son 1.200. Acá se define la meta que rige en el periodo elegido. */
+let METAS = null, METAS_ORIG = '';
+
+async function cargarMetasPeriodo() {
+  const caja = $('#mtpCaja'); if (!caja) return;
+  const id = $('#mtPeriodo')?.value;
+  if (!id) { caja.innerHTML = '<div class="vacio">Todavía no hay periodos.</div>'; return; }
+  try { METAS = await api('/api/metas/' + id); }
+  catch (e) { caja.innerHTML = `<div class="aviso err">${esc(e.message)}</div>`; return; }
+  METAS_ORIG = JSON.stringify(METAS.filas.map((f) => f.propia));
+  pintarMetasPeriodo();
+}
+
+const metasCambiaron = () => METAS && JSON.stringify(METAS.filas.map((f) => f.propia)) !== METAS_ORIG;
+
+function pintarMetasPeriodo() {
+  const cambios = metasCambiaron();
+  const soloLectura = !puedeEditar(YO);
+  $('#mtpCaja').innerHTML = `<div class="scroll"><table><thead><tr>
+      <th>Indicador</th><th>Mejor cuando es</th><th class="num">Meta general</th>
+      <th class="num">Meta de este periodo</th><th></th></tr></thead><tbody>
+    ${METAS.filas.map((f) => `<tr>
+      <td><b>${esc(f.nombre)}</b>${f.principal ? ' <span class="pill lima">principal</span>' : ''}</td>
+      <td>${f.direccion === 'menor' ? 'más baja' : 'más alta'}</td>
+      <td class="num">${f.general === null ? '—' : nfmt(f.general, f.decimales)}</td>
+      <td class="num">${soloLectura
+        ? (f.propia === null ? '<span style="color:var(--muted)">la general</span>' : nfmt(f.propia, f.decimales))
+        : `<input type="number" step="any" min="0" data-meta="${f.id}" style="width:120px;text-align:right"
+             value="${f.propia === null ? '' : f.propia}" placeholder="la general">`}</td>
+      <td>${f.unidad ? esc(f.unidad) : ''}</td>
+    </tr>`).join('')}</tbody></table></div>
+    ${soloLectura ? '' : `<div class="barra-guardar">
+      ${cambios ? '<span class="pendiente">Hay cambios sin guardar</span>'
+                : '<span class="sub" style="margin:0">Todo guardado.</span>'}
+      <div class="sp"></div>
+      <button class="btn" id="mtpAnteriores" title="Deja los periodos anteriores con estas mismas metas">⏮ Copiar a los anteriores</button>
+      <button class="btn" id="mtpDescartar" ${cambios ? '' : 'disabled'}>Descartar cambios</button>
+      <button class="btn primary" id="mtpGuardar" ${cambios ? '' : 'disabled'}>Guardar metas</button>
+    </div>`}`;
+  activarMetasPeriodo();
+}
+
+function activarMetasPeriodo() {
+  $$('#mtpCaja [data-meta]').forEach((el) => el.addEventListener('input', () => {
+    const f = METAS.filas.find((x) => x.id === Number(el.dataset.meta));
+    f.propia = el.value === '' ? null : Number(el.value);
+    const b = $('#mtpCaja .barra-guardar');
+    if (b && !b.querySelector('.pendiente')) {
+      b.insertAdjacentHTML('afterbegin', '<span class="pendiente">Hay cambios sin guardar</span>');
+      b.querySelector('.sub')?.remove();
+      $('#mtpGuardar').disabled = false; $('#mtpDescartar').disabled = false;
+    }
+  }));
+  $('#mtpDescartar')?.addEventListener('click', () => { cargarMetasPeriodo(); toast('Cambios descartados'); });
+  $('#mtpGuardar')?.addEventListener('click', async () => {
+    const btn = $('#mtpGuardar'); btn.disabled = true; btn.textContent = 'Guardando…';
+    const metas = {};
+    METAS.filas.forEach((f) => { metas[f.id] = f.propia; });
+    try {
+      const r = await api('/api/metas/' + METAS.periodo.id, { method: 'PUT', body: { metas } });
+      toast(`✓ Guardado: ${r.periodo} quedó con ${r.guardadas} meta(s) propia(s)`);
+      await cargarMetasPeriodo();
+      recargar();
+    } catch (e) { btn.disabled = false; btn.textContent = 'Guardar metas'; toast(e.message, true); }
+  });
+  $('#mtpAnteriores')?.addEventListener('click', async () => {
+    if (metasCambiaron()) return toast('Guardá los cambios antes de copiarlos', true);
+    if (!confirm(`Los periodos anteriores a "${METAS.periodo.etiqueta}" van a quedar con estas mismas metas.\n\n¿Continuar?`)) return;
+    try {
+      const r = await api(`/api/metas/${METAS.periodo.id}/anteriores`, { method: 'POST' });
+      toast(`✓ Aplicado a ${r.periodos} periodo(s) anteriores`);
+      recargar();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+const mtSel = $('#mtPeriodo'); if (mtSel) mtSel.addEventListener('change', cargarMetasPeriodo);
+
 function pintarPeriodos() {
   const f = (d) => String(d).slice(0, 10).split('-').reverse().join('/');
   $('#peTabla').innerHTML = PERIODOS.length ? `<table><thead><tr>

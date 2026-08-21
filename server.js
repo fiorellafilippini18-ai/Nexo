@@ -516,6 +516,62 @@ app.delete('/api/metricas/:id', pedirLogin, pedir('indicadores'), async (req, re
   res.json({ ok: true });
 });
 
+/* --- Metas de un periodo puntual ---
+   La meta puede cambiar mes a mes. Acá se ve y se edita la de cada periodo,
+   sin tocar la meta general ni los periodos ya cerrados. */
+app.get('/api/metas/:periodoId', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const per = await one('SELECT * FROM periodos WHERE id=$1', [req.params.periodoId]);
+  if (!per) return res.status(404).json({ error: 'Periodo inexistente' });
+  const metricas = await metricasDe(per.id);
+  res.json({
+    periodo: per,
+    filas: metricas.map((m) => ({
+      id: m.id, nombre: m.nombre, unidad: m.unidad, decimales: m.decimales,
+      direccion: m.direccion, principal: m.principal,
+      general: m.meta_general, propia: m.meta_propia ? m.meta : null, meta: m.meta
+    }))
+  });
+});
+
+app.put('/api/metas/:periodoId', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const per = await one('SELECT * FROM periodos WHERE id=$1', [req.params.periodoId]);
+  if (!per) return res.status(404).json({ error: 'Periodo inexistente' });
+  const metas = req.body.metas && typeof req.body.metas === 'object' ? req.body.metas : {};
+  const validas = await all('SELECT id FROM metricas WHERE activa');
+  let guardadas = 0;
+  for (const { id } of validas) {
+    const v = metas[id];
+    if (v === undefined) continue;
+    if (v === null || v === '') {
+      await q('DELETE FROM metas_periodo WHERE periodo_id=$1 AND metrica_id=$2', [per.id, id]);
+      continue;
+    }
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Hay una meta que no es un número válido' });
+    await q(`INSERT INTO metas_periodo (periodo_id, metrica_id, meta) VALUES ($1,$2,$3)
+             ON CONFLICT (periodo_id, metrica_id) DO UPDATE SET meta=EXCLUDED.meta`, [per.id, id, n]);
+    guardadas++;
+  }
+  res.json({ ok: true, guardadas, periodo: per.etiqueta });
+});
+
+/** Copiar las metas de este periodo a todos los anteriores, que es el caso
+ *  típico: se define un umbral nuevo y hay que dejar la historia como estaba. */
+app.post('/api/metas/:periodoId/anteriores', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const per = await one('SELECT * FROM periodos WHERE id=$1', [req.params.periodoId]);
+  if (!per) return res.status(404).json({ error: 'Periodo inexistente' });
+  const metricas = await metricasDe(per.id);
+  const anteriores = await all('SELECT id FROM periodos WHERE desde < $1', [per.desde]);
+  for (const p of anteriores) {
+    for (const m of metricas) {
+      if (m.meta === null || m.meta === undefined) continue;
+      await q(`INSERT INTO metas_periodo (periodo_id, metrica_id, meta) VALUES ($1,$2,$3)
+               ON CONFLICT (periodo_id, metrica_id) DO UPDATE SET meta=EXCLUDED.meta`, [p.id, m.id, m.meta]);
+    }
+  }
+  res.json({ ok: true, periodos: anteriores.length });
+});
+
 /* ---------------------------------------------------------------
    Periodos
 --------------------------------------------------------------- */
@@ -735,6 +791,13 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
       }
     }
 
+    // 4b. congelar las metas vigentes en este periodo.
+    // Si mañana cambia la meta general, este periodo conserva la que se le exigió.
+    await cliente.query(
+      `INSERT INTO metas_periodo (periodo_id, metrica_id, meta)
+       SELECT $1, id, meta FROM metricas WHERE activa AND meta IS NOT NULL
+       ON CONFLICT (periodo_id, metrica_id) DO NOTHING`, [periodoId]);
+
     // 5. guardar el archivo original
     await cliente.query('DELETE FROM archivos WHERE periodo_id=$1', [periodoId]);
     const buf = Buffer.from(pend.b64, 'base64');
@@ -769,8 +832,19 @@ app.get('/api/periodos/:id/archivo', pedirLogin, pedirGestion, async (req, res) 
 /* ---------------------------------------------------------------
    Resultados
 --------------------------------------------------------------- */
+/** Las metas que rigen en un periodo: las propias del periodo si las tiene,
+ *  y si no, la meta general del indicador. */
+async function metricasDe(periodoId) {
+  const base = await all('SELECT * FROM metricas WHERE activa ORDER BY principal DESC, orden, id');
+  const propias = await all('SELECT metrica_id, meta FROM metas_periodo WHERE periodo_id=$1', [periodoId]);
+  const mapa = new Map(propias.map((p) => [p.metrica_id, p.meta]));
+  return base.map((m) => (mapa.has(m.id)
+    ? { ...m, meta: mapa.get(m.id), meta_general: m.meta, meta_propia: true }
+    : { ...m, meta_general: m.meta, meta_propia: false }));
+}
+
 async function datosPeriodo(periodoId) {
-  const metricas = await all('SELECT * FROM metricas WHERE activa ORDER BY principal DESC, orden, id');
+  const metricas = await metricasDe(periodoId);
   // Se incluye a quienes ya no están en el equipo: sus datos siguen contando
   // para el promedio del periodo, y se muestran como "Nombre (eliminada)".
   const filas = await all(

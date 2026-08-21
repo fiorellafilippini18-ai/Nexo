@@ -253,7 +253,9 @@
       <section class="vista" id="v-indicadores">
         <div class="card">
           <h2>Indicadores</h2>
-          <p class="sub">Los marcados como <b>principales</b> definen el plus. El consejo se le muestra al agente cuando no llega a la meta.</p>
+          <p class="sub">Los marcados como <b>principales</b> definen el plus. El consejo se le muestra al agente cuando no llega a la meta.<br>
+            Esta es la <b>meta general</b>: la que se aplica cuando el periodo no tiene una propia.
+            Para cambiarla solo en un mes, entrá a <b>Periodos → Metas de este periodo</b>.</p>
           <div class="scroll"><div id="mtTabla"></div></div>
         </div>
         <div class="card">
@@ -271,6 +273,16 @@
 
       <!-- ======== PERIODOS ======== -->
       <section class="vista" id="v-periodos">
+        <div class="card">
+          <div class="flex">
+            <div><h2 style="margin:0">Metas de este periodo</h2>
+              <p class="sub" style="margin:3px 0 0">La meta puede cambiar mes a mes. Lo que pongas acá rige
+                solo para este periodo; si lo dejás vacío, se usa la meta general del indicador.</p></div>
+            <div class="sp"></div>
+            <select id="mtPeriodo" style="width:auto;min-width:210px"></select>
+          </div>
+          <div id="mtpCaja" style="margin-top:16px"></div>
+        </div>
         <div class="card">
           <h2>Periodos</h2>
           <p class="sub">Desde <b>Gestionar</b> podés publicar, archivar, deshacer una carga mal hecha

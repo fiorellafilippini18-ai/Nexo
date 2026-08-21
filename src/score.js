@@ -53,22 +53,29 @@ export function destacados(metricas, personas) {
     };
   }).filter(Boolean);
 
-  // Mejor asesor general: más indicadores cumplidos; desempata el promedio de avance
+  /* Mejor asesor del periodo: el que ganó más indicadores principales (más MVP).
+     Si empatan, decide quién cumplió más metas y, si sigue el empate, el promedio
+     de avance. Se mira sobre los tres indicadores principales, no sobre uno solo. */
   let general = null;
   const puntuados = personas.map((p) => {
-    const ev = evaluar(metricas, p.valores, promedios);
-    const avs = ev.detalle.filter((d) => d.principal && d.avance !== null).map((d) => d.avance);
-    return { p, cumplidos: ev.cumplidos, total: ev.total, prom: avs.length ? avs.reduce((a, b) => a + b, 0) / avs.length : 0 };
+    const ev = evaluar(metricas, p.valores, promedios, p);
+    const avs = ev.detalle.filter((d) => d.principal && d.avance !== null && !d.exento).map((d) => d.avance);
+    return {
+      p, cumplidos: ev.cumplidos, total: ev.total,
+      prom: avs.length ? avs.reduce((a, b) => a + b, 0) / avs.length : 0,
+      mvps: porIndicador.filter((x) => x.usuarioId === p.id).length
+    };
   }).filter((x) => x.total > 0);
 
-  if (puntuados.length) {
-    puntuados.sort((a, b) => (b.cumplidos - a.cumplidos) || (b.prom - a.prom));
+  if (puntuados.length > 1) {
+    puntuados.sort((a, b) => (b.mvps - a.mvps) || (b.cumplidos - a.cumplidos) || (b.prom - a.prom));
     const g = puntuados[0];
-    // solo hay "mejor asesor" si cumplió todo y le saca ventaja a alguien
-    if (g.cumplidos === g.total && puntuados.length > 1) {
+    // tiene que haber ganado al menos un indicador principal
+    if (g.mvps > 0) {
       general = {
         usuarioId: g.p.id, nombre: g.p.nombre, puesto: g.p.puesto, avatar: g.p.avatar || null,
         cumplidos: g.cumplidos, total: g.total, promedio: g.prom,
+        mvps: g.mvps, principales: principales.length,
         icono: '🏆', titulo: 'Mejor asesor del periodo'
       };
     }

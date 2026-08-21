@@ -186,3 +186,16 @@ INSERT INTO config (clave, valor) VALUES ('margen_limite', '5')
    la persona confirma explícitamente que la leyó y la entendió. */
 ALTER TABLE notas ADD COLUMN IF NOT EXISTS confirmada  TIMESTAMPTZ;
 ALTER TABLE notas ADD COLUMN IF NOT EXISTS confirmacion TEXT NOT NULL DEFAULT '';
+
+/* Metas por periodo.
+   La meta de cada indicador puede cambiar mes a mes: en julio el umbral de
+   chats era 800 y desde agosto es 1.200. Lo que se carga acá manda sobre la
+   meta general del indicador; si un periodo no tiene fila, usa la general.
+   Al importar una planilla se congela la meta vigente, así cambiar la meta
+   general nunca reescribe la historia. */
+CREATE TABLE IF NOT EXISTS metas_periodo (
+  periodo_id INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+  metrica_id INTEGER NOT NULL REFERENCES metricas(id) ON DELETE CASCADE,
+  meta       NUMERIC NOT NULL,
+  PRIMARY KEY (periodo_id, metrica_id)
+);

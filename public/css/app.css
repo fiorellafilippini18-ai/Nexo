@@ -661,6 +661,8 @@ td, th{overflow-wrap:break-word}
 .conclusion input, .conclusion textarea{width:100%;margin-bottom:8px}
 .conclusion textarea{min-height:70px}
 .conclusion .acciones{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+/* Solo lectura: se lee como texto, sin campos ni botones */
+.conclusion.leida p{font-size:13.5px;color:var(--ink-2);line-height:1.55;margin:0;overflow-wrap:break-word}
 
 /* Barra de guardado: aparece cuando hay cambios sin aplicar */
 .barra-guardar{position:sticky;bottom:0;background:var(--surface);border-top:2px solid var(--primary);

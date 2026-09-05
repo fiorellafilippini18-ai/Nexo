@@ -438,6 +438,15 @@ tr.editor td{background:var(--surface-2)}
 .permiso b{display:block;font-size:13.5px;font-weight:600;line-height:1.35}
 .permiso small{color:var(--muted);font-size:11.5px;font-family:ui-monospace,monospace}
 
+/* Metas propias de una persona, dentro del editor de colaboradores */
+.metas-propias{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.meta-propia{display:flex;flex-direction:column;gap:5px;padding:12px 14px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);background:var(--surface);min-width:0}
+.meta-propia:has(input:not(:placeholder-shown)){border-color:var(--primary);background:var(--primary-suave)}
+.meta-propia .n{font-size:13.5px;font-weight:650;line-height:1.3;overflow-wrap:break-word}
+.meta-propia input{width:100%}
+.meta-propia small{color:var(--muted);font-size:11.5px;overflow-wrap:break-word}
+
 /* =========================================================
    Paleta alternativa: rosa neón
    Se activa con data-palette="rosa" en <html>. Convive con

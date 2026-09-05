@@ -427,9 +427,14 @@ async function cargarEquipo() {
         <b>${esc(f.nombre)}</b><small>${esc(f.puesto || '')}</small></div></div></td>
       ${principales.map((m) => {
         const det = f.detalle.find((x) => x.id === m.id);
-        return `<td class="num">${det && det.valor !== null
-          ? `${nfmt(det.valor, m.decimales)} ${det.cumple ? '<span style="color:var(--good)">✓</span>' : '<span style="color:var(--critical)">✕</span>'}`
-          : '—'}</td>`;
+        if (!det || det.valor === null) return '<td class="num">—</td>';
+        // Si el indicador no se le exige, no lleva ✓ ni ✕: no se lo está evaluando.
+        const marca = det.exento
+          ? '<span style="color:var(--muted)" title="No se le exige este indicador">·</span>'
+          : det.cumple ? '<span style="color:var(--good)">✓</span>'
+                       : '<span style="color:var(--critical)">✕</span>';
+        const suya = det.meta_de_persona ? ` title="Meta propia de ${esc(f.nombre)}: ${nfmt(det.meta, m.decimales)}"` : '';
+        return `<td class="num"${suya}>${nfmt(det.valor, m.decimales)} ${marca}</td>`;
       }).join('')}
       <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
@@ -821,6 +826,14 @@ function abrirEditor(id) {
       <div class="aviso info" style="margin-top:18px">La gerencia tiene todos los permisos, siempre.
         No se le pueden quitar: es el perfil que reparte los permisos del resto.</div>` : ''}
 
+    ${puede(YO, 'indicadores') && u.rol !== 'invitado' ? `
+      <div style="margin-top:20px" id="edMetas">
+        <label class="f">Metas propias de ${esc(u.nombre)}</label>
+        <p class="sub" style="margin:0 0 11px">Solo si a esta persona se le exige un número distinto al del resto.
+          Vacío = se le aplica la meta del periodo. Lo que pongas acá manda sobre todo lo demás.</p>
+        <div class="cargando-metas sub">Cargando sus metas…</div>
+      </div>` : ''}
+
     <div class="barra-guardar" style="margin:18px 0 0;border-radius:var(--radius-sm)">
       <span class="pendiente oculto" id="edPendiente">Hay cambios sin guardar</span>
       <span class="sub" id="edSinCambios" style="margin:0">Sin cambios por ahora.</span>
@@ -842,10 +855,33 @@ function abrirEditor(id) {
     $('#edPendiente')?.classList.remove('oculto');
     $('#edSinCambios')?.classList.add('oculto');
   };
-  $$('input, select, textarea', tr).forEach((el) => {
+  const escucharCambios = (raiz) => $$('input, select, textarea', raiz).forEach((el) => {
     el.addEventListener('input', marcarCambio);
     el.addEventListener('change', marcarCambio);
   });
+  escucharCambios(tr);
+
+  // Las metas propias se traen aparte: son pocas y solo cuando se abre el editor
+  if ($('#edMetas')) {
+    api(`/api/usuarios/${id}/metas`).then((d) => {
+      const caja = $('#edMetas'); if (!caja) return;
+      const principales = d.filas.filter((f) => f.principal);
+      caja.querySelector('.cargando-metas')?.remove();
+      caja.insertAdjacentHTML('beforeend', `<div class="metas-propias">
+        ${principales.map((f) => `<label class="meta-propia">
+          <span class="n">${esc(f.nombre)}</span>
+          <input type="number" step="any" min="0" data-metausu="${f.id}"
+            value="${f.propia === null ? '' : f.propia}"
+            placeholder="${f.general === null ? 'sin meta' : nfmt(f.general, f.decimales)}">
+          <small>${f.unidad ? esc(f.unidad) + ' · ' : ''}general: ${f.general === null ? '—' : nfmt(f.general, f.decimales)}</small>
+        </label>`).join('')}
+      </div>
+      ${u.rol === 'supervisor' && principales.some((f) => f.exime_supervision)
+        ? '<p class="sub" style="margin:10px 0 0">Hay un indicador marcado como <b>"no aplica a supervisión"</b>: si le cargás una meta propia acá, pasa a exigírsele ese número en vez de quedar exenta.</p>'
+        : ''}`);
+      escucharCambios(caja);
+    }).catch(() => { $('#edMetas')?.remove(); });
+  }
 
   $('#edCerrar').addEventListener('click', () => {
     const hayCambios = !$('#edPendiente')?.classList.contains('oculto');
@@ -868,11 +904,22 @@ function abrirEditor(id) {
         await api(`/api/usuarios/${id}/permisos`, { method: 'PUT',
           body: { permisos: cajas.filter((c) => c.checked).map((c) => c.dataset.permiso) } });
       }
+      // metas propias: se manda el campo vacío como null para volver a la del periodo
+      const campos = $$('[data-metausu]', tr);
+      let conMeta = 0;
+      if (campos.length) {
+        const metas = {};
+        campos.forEach((c) => {
+          metas[c.dataset.metausu] = c.value === '' ? null : Number(c.value);
+          if (c.value !== '') conMeta++;
+        });
+        await api(`/api/usuarios/${id}/metas`, { method: 'PUT', body: { metas } });
+      }
       EDITANDO = null;
       const cuantos = cajas.length ? cajas.filter((c) => c.checked).length : null;
       toast(cuantos === null
-        ? `✓ Guardado: los datos de ${u.nombre} quedaron actualizados`
-        : `✓ Guardado: ${u.nombre} quedó con ${cuantos} permiso(s)`);
+        ? `✓ Guardado: ${u.nombre}${conMeta ? ` quedó con ${conMeta} meta(s) propia(s)` : ' quedó actualizada'}`
+        : `✓ Guardado: ${u.nombre} quedó con ${cuantos} permiso(s)${conMeta ? ` y ${conMeta} meta(s) propia(s)` : ''}`);
       recargar();
     } catch (e) { err.textContent = e.message; err.classList.remove('oculto'); }
   });

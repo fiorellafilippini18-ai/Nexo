@@ -199,3 +199,14 @@ CREATE TABLE IF NOT EXISTS metas_periodo (
   meta       NUMERIC NOT NULL,
   PRIMARY KEY (periodo_id, metrica_id)
 );
+
+/* Metas propias de una persona.
+   El umbral no siempre es el mismo para todos: una supervisora, alguien de
+   media jornada o un perfil senior pueden tener su propio mínimo. Esta meta
+   pisa la del periodo y la general, y solo para esa persona. */
+CREATE TABLE IF NOT EXISTS metas_persona (
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  metrica_id INTEGER NOT NULL REFERENCES metricas(id) ON DELETE CASCADE,
+  meta       NUMERIC NOT NULL,
+  PRIMARY KEY (usuario_id, metrica_id)
+);

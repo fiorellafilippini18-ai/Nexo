@@ -42,8 +42,8 @@ export function destacados(metricas, personas) {
     const mejor = conValor.reduce((a, b) =>
       (m.direccion === 'menor' ? Number(b.valores[m.id]) < Number(a.valores[m.id])
                                : Number(b.valores[m.id]) > Number(a.valores[m.id])) ? b : a);
-    // solo se premia si además cumple la meta
-    if (cumple(mejor.valores[m.id], m) === false) return null;
+    // solo se premia si además cumple la meta que se le exige a esa persona
+    if (cumple(mejor.valores[m.id], conMetaDe(m, mejor)) === false) return null;
     return {
       metricaId: m.id, metrica: m.nombre, unidad: m.unidad, decimales: m.decimales,
       ...tituloDestacado(m),
@@ -82,6 +82,20 @@ export function destacados(metricas, personas) {
   }
 
   return { general, porIndicador };
+}
+
+/* --- Metas propias de una persona -------------------------------------
+   Orden de prioridad de la meta: la de la persona, después la del periodo,
+   y al final la general del indicador. Todo lo que evalúa desempeño pasa
+   por acá, así el número que se le exige a cada uno es siempre el mismo. */
+export function metaPropia(metrica, persona) {
+  const v = persona && persona.metas ? persona.metas[metrica.id] : undefined;
+  return (v === undefined || v === null || v === '') ? null : Number(v);
+}
+
+export function conMetaDe(metrica, persona) {
+  const propia = metaPropia(metrica, persona);
+  return propia === null ? metrica : { ...metrica, meta: propia, meta_de_persona: true };
 }
 
 export function cumple(valor, metrica) {
@@ -123,10 +137,13 @@ export function brecha(valor, metrica) {
  */
 export function evaluar(metricas, valores, promedios = {}, persona = null) {
   // A la supervisión no se le evalúan los indicadores marcados como
-  // "no aplica a supervisión" (el volumen, típicamente).
-  const exento = (m) => !!m.exime_supervision && persona && persona.rol === 'supervisor';
+  // "no aplica a supervisión" (el volumen, típicamente). Salvo que esa persona
+  // tenga su propia meta cargada: ahí sí se la evalúa, contra ese número.
+  const exento = (m) => !!m.exime_supervision && persona && persona.rol === 'supervisor'
+                        && metaPropia(m, persona) === null;
 
-  const detalle = metricas.map((m) => {
+  const detalle = metricas.map((m0) => {
+    const m = conMetaDe(m0, persona);
     const valor = valores[m.id] ?? null;
     const ok = cumple(valor, m);
     const av = avance(valor, m);

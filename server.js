@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, q, one, all, migrate, norm } from './src/db.js';
 import { analizar, sugerir, claveIndicador, normTxt,
          detectarPeriodo, leerFortalezas, leerConclusiones } from './src/parse.js';
-import { evaluar, destacados, cumple, ESCALA } from './src/score.js';
+import { evaluar, destacados, cumple, conMetaDe, metaPropia, ESCALA } from './src/score.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -559,6 +559,47 @@ app.put('/api/metas/:periodoId', pedirLogin, pedir('indicadores'), async (req, r
   res.json({ ok: true, guardadas, periodo: per.etiqueta });
 });
 
+/* --- Metas propias de una persona ---
+   El umbral puede ser distinto para alguien puntual: una supervisora, media
+   jornada, un perfil senior. Pisa la del periodo y la general, solo para ella. */
+app.get('/api/usuarios/:id/metas', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const u = await one('SELECT id, nombre, rol FROM usuarios WHERE id=$1', [req.params.id]);
+  if (!u) return res.status(404).json({ error: 'Persona inexistente' });
+  const metricas = await all('SELECT * FROM metricas WHERE activa ORDER BY principal DESC, orden, id');
+  const propias = await all('SELECT metrica_id, meta FROM metas_persona WHERE usuario_id=$1', [u.id]);
+  const mapa = new Map(propias.map((p) => [p.metrica_id, Number(p.meta)]));
+  res.json({
+    usuario: u,
+    filas: metricas.map((m) => ({
+      id: m.id, nombre: m.nombre, unidad: m.unidad, decimales: m.decimales,
+      direccion: m.direccion, principal: m.principal, exime_supervision: m.exime_supervision,
+      general: m.meta, propia: mapa.has(m.id) ? mapa.get(m.id) : null
+    }))
+  });
+});
+
+app.put('/api/usuarios/:id/metas', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const u = await one('SELECT id, nombre FROM usuarios WHERE id=$1', [req.params.id]);
+  if (!u) return res.status(404).json({ error: 'Persona inexistente' });
+  const metas = req.body.metas && typeof req.body.metas === 'object' ? req.body.metas : {};
+  const validas = await all('SELECT id FROM metricas WHERE activa');
+  let guardadas = 0;
+  for (const { id } of validas) {
+    const v = metas[id];
+    if (v === undefined) continue;
+    if (v === null || v === '') {
+      await q('DELETE FROM metas_persona WHERE usuario_id=$1 AND metrica_id=$2', [u.id, id]);
+      continue;
+    }
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Hay una meta propia que no es un número válido' });
+    await q(`INSERT INTO metas_persona (usuario_id, metrica_id, meta) VALUES ($1,$2,$3)
+             ON CONFLICT (usuario_id, metrica_id) DO UPDATE SET meta=EXCLUDED.meta`, [u.id, id, n]);
+    guardadas++;
+  }
+  res.json({ ok: true, guardadas, nombre: u.nombre });
+});
+
 /** Copiar las metas de este periodo a todos los anteriores, que es el caso
  *  típico: se define un umbral nuevo y hay que dejar la historia como estaba. */
 app.post('/api/metas/:periodoId/anteriores', pedirLogin, pedir('indicadores'), async (req, res) => {
@@ -856,11 +897,16 @@ async function datosPeriodo(periodoId) {
      FROM resultados r JOIN usuarios u ON u.id=r.usuario_id
      WHERE r.periodo_id=$1`, [periodoId]);
 
+  // Metas propias de cada persona: pisan la del periodo y la general.
+  const personales = await all('SELECT usuario_id, metrica_id, meta FROM metas_persona');
+
   const porUsuario = {};
   for (const f of filas) {
     porUsuario[f.usuario_id] ||= {
       id: f.usuario_id, nombre: etiquetaNombre(f), puesto: f.puesto, avatar: f.avatar,
-      activo: f.activo, rol: f.rol, valores: {}
+      activo: f.activo, rol: f.rol, valores: {},
+      metas: Object.fromEntries(personales.filter((x) => x.usuario_id === f.usuario_id)
+        .map((x) => [x.metrica_id, Number(x.meta)]))
     };
     porUsuario[f.usuario_id].valores[f.metrica_id] = Number(f.valor);
   }
@@ -1046,8 +1092,11 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
   const visible = (u) => completo || u.id === req.uid;
   const filas = Object.values(porUsuario).filter(visible).map((u) => {
     const valor = vol ? u.valores[vol.id] ?? null : null;
-    const exento = vol && vol.exime_supervision && u.rol === 'supervisor';
-    const meta = vol && vol.meta !== null && vol.meta !== undefined ? Number(vol.meta) : null;
+    // La meta que se le exige a esta persona: la suya si la tiene, si no la del periodo.
+    const volU = vol ? conMetaDe(vol, u) : null;
+    const propia = vol ? metaPropia(vol, u) : null;
+    const exento = vol && vol.exime_supervision && u.rol === 'supervisor' && propia === null;
+    const meta = volU && volU.meta !== null && volU.meta !== undefined ? Number(volU.meta) : null;
     const sinMeta = !!vol && meta === null;
     const faltan = (valor === null || meta === null || exento) ? null : Math.max(0, meta - Number(valor));
     const primer = String(u.nombre).split(' ')[0];
@@ -1065,7 +1114,7 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
             : `${primer} ya superó la meta de ${nf0(meta)} chats con ${nf0(valor)}. Excelente.`),
       otros: otras.map((m) => ({
         id: m.id, nombre: m.nombre, unidad: m.unidad, decimales: m.decimales,
-        valor: u.valores[m.id] ?? null, cumple: cumple(u.valores[m.id] ?? null, m)
+        valor: u.valores[m.id] ?? null, cumple: cumple(u.valores[m.id] ?? null, conMetaDe(m, u))
       }))
     };
   }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
@@ -1090,15 +1139,18 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
       periodo: mensual, meta: metaM, margen,
       filas: Object.values(dm.porUsuario).filter(visible).map((u) => {
         const valor = volM ? u.valores[volM.id] ?? null : null;
-        const exento = volM && volM.exime_supervision && u.rol === 'supervisor';
-        const m = (valor === null || metaM === null) ? null
+        // Cada persona se mide contra la meta que le corresponde a ella
+        const propiaM = volM ? metaPropia(volM, u) : null;
+        const metaSuya = propiaM !== null ? propiaM : metaM;
+        const exento = volM && volM.exime_supervision && u.rol === 'supervisor' && propiaM === null;
+        const m = (valor === null || metaSuya === null) ? null
           : exento
             ? { clase: 'exento', etiqueta: 'No aplica', emoji: '🛡',
                 texto: `${String(u.nombre).split(' ')[0]}, por tu rol de supervisión no se te mide el volumen de chats. Tu foco es acompañar al equipo.` }
-            : mensajeDelMes(u.nombre, valor, metaM, margen);
+            : mensajeDelMes(u.nombre, valor, metaSuya, margen);
         return {
           usuarioId: u.id, nombre: u.nombre, puesto: u.puesto, avatar: u.avatar,
-          esMio: u.id === req.uid, valor, ...(m || {})
+          esMio: u.id === req.uid, valor, meta: metaSuya, metaPropia: propiaM, ...(m || {})
         };
       }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
     };

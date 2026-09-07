@@ -9,7 +9,7 @@ const TITULOS = {
   analisis:    ['Fortalezas y errores', 'Lo que cada persona hace bien y lo que debe corregir'],
   conclusiones:['Conclusiones', 'Recomendaciones para Gerencia'],
   destacados:  ['Destacados', 'Podio del periodo y registro histórico'],
-  notas:       ['Notas al equipo', 'Mensajes en el perfil de cada persona'],
+  notas:       ['Notas', 'Las que dejás en cada perfil y las que te dejan a vos'],
   personas:    ['Colaboradores', 'Alta y gestión del equipo'],
   invitados:   ['Invitados', 'Quién entra solo a mirar, con qué permisos'],
   indicadores: ['Indicadores', 'Metas y consejos de mejora'],
@@ -100,7 +100,9 @@ async function recargar() {
   const opts = PERIODOS.filter((p) => !p.archivado)
     .map((p) => `<option value="${p.id}">${esc(p.etiqueta)}${p.publicado ? '' : ' (sin publicar)'}</option>`).join('');
   ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo', '#mtPeriodo'].forEach((s) => llenarSelect(s, opts));
-  const opUsuarios = USUARIOS.filter((u) => u.activo && u.rol === 'agente').map((u) => `<option value="${u.id}">${esc(u.nombre)}</option>`).join('');
+  // El equipo entero puede recibir una nota, también la supervisión. Menos yo misma.
+  const opUsuarios = USUARIOS.filter((u) => u.activo && esColaborador(u) && u.id !== YO.id)
+    .map((u) => `<option value="${u.id}">${esc(u.nombre)}${u.rol === 'supervisor' ? ' (supervisión)' : ''}</option>`).join('');
   ['#coUsuario', '#ntUsuario'].forEach((s) => llenarSelect(s, opUsuarios));
   llenarSelect('#ntFiltro', '<option value="">Todo el equipo</option>' + opUsuarios);
   conTexto('#bPersonas', USUARIOS.filter(esColaborador).length);
@@ -632,8 +634,62 @@ $('#dsCSV').addEventListener('click', () => {
   toast('CSV descargado');
 });
 
-/* ---------------- notas ---------------- */
+/* ---------------- notas ----------------
+   Acá conviven dos cosas: las notas que dejo yo, y las que me dejan a mí.
+   La supervisión también recibe, así que necesita poder leerlas y confirmarlas. */
+let MIS_NOTAS = [];
+
+async function cargarMisNotas() {
+  const caja = $('#ntMias'); if (!caja) return;
+  try { MIS_NOTAS = await api('/api/notas'); } catch (e) { MIS_NOTAS = []; }
+  const badge = $('#bMisNotas');
+  const pendientes = MIS_NOTAS.filter((n) => !n.confirmada).length;
+  if (badge) { badge.textContent = pendientes; badge.classList.toggle('oculto', !pendientes); }
+  if (!MIS_NOTAS.length) { caja.innerHTML = ''; return; }
+  const iconos = { nota: '📝', felicitacion: '🎉', atencion: '⚠️' };
+  const sinConf = MIS_NOTAS.filter((n) => !n.confirmada).length;
+  caja.innerHTML = `<div class="card">
+    <div class="flex"><div><h2 style="margin:0">Notas para vos</h2>
+      <p class="sub" style="margin:3px 0 0">Lo que te dejaron en tu perfil.</p></div>
+      <div class="sp"></div>
+      ${sinConf ? `<span class="pill warning">${sinConf} sin confirmar</span>` : ''}
+    </div>
+    <div style="margin-top:14px">
+      ${MIS_NOTAS.map((n) => `<div class="nota ${n.confirmada ? '' : 'nueva'}">
+        <div style="font-size:14.5px">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</div>
+        <div class="meta">${esc(firmaDe(n))} · ${new Date(n.creada).toLocaleString('es-PY', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+        <div class="confirmar" data-nota="${n.id}">${confirmacionMia(n)}</div>
+      </div>`).join('')}
+    </div></div>`;
+  activarMisConfirmaciones();
+}
+
+function confirmacionMia(n) {
+  if (n.confirmada) {
+    const f = new Date(n.confirmada).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' });
+    return `<span class="pill good">${esc(n.confirmacion || '✓')} Confirmaste el ${f}</span>`;
+  }
+  return `<button class="btn sm" data-gesto="👍">👍 Leído y entendido</button>
+          <button class="btn sm" data-gesto="✅">✅ Entendido, lo aplico</button>`;
+}
+
+function activarMisConfirmaciones() {
+  $$('#ntMias .confirmar [data-gesto]').forEach((b) => b.addEventListener('click', async () => {
+    const caja = b.closest('.confirmar');
+    $$('[data-gesto]', caja).forEach((x) => (x.disabled = true));
+    try {
+      await api(`/api/notas/${caja.dataset.nota}/confirmar`, { method: 'POST', body: { gesto: b.dataset.gesto } });
+      toast('Confirmado');
+      cargarMisNotas();
+    } catch (e) {
+      $$('[data-gesto]', caja).forEach((x) => (x.disabled = false));
+      toast(e.message, true);
+    }
+  }));
+}
+
 async function cargarNotasAdmin() {
+  cargarMisNotas();
   const uid = $('#ntFiltro').value;
   let lista = [];
   try {
@@ -648,11 +704,12 @@ async function cargarNotasAdmin() {
   $('#ntLista').innerHTML = lista.length
     ? `${sinConfirmar ? `<div class="aviso warn">Hay <b>${sinConfirmar}</b> nota(s) que todavía nadie confirmó.</div>` : ''}
       <div class="scroll"><div class="tabla-notas"><table><thead><tr>
-        <th>Para</th><th>Nota</th><th>Enviada</th><th>Confirmación</th><th></th>
+        <th>Para</th><th>Nota</th><th>De</th><th>Enviada</th><th>Confirmación</th><th></th>
       </tr></thead><tbody>
       ${lista.map((n) => `<tr>
         <td><div class="who">${avatarHTML(n)}<div><b>${esc(n.nombre)}</b><small>${esc(n.puesto || '')}</small></div></div></td>
         <td class="celda-nota">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</td>
+        <td style="font-size:12.5px;color:var(--ink-2)">${esc(firmaDe(n))}</td>
         <td style="font-size:12.5px;color:var(--ink-2);white-space:nowrap">${fecha(n.creada)}</td>
         <td>${n.confirmada
           ? `<span class="pill good">${esc(n.confirmacion || '✓')} ${fecha(n.confirmada)}</span>`

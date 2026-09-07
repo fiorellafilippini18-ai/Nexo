@@ -17,7 +17,7 @@ const TITULOS = {
   equipo:    ['Resultados del equipo', 'Cómo le fue a todo el equipo en el periodo'],
   detalle:   ['Detalle por criterio', 'Aspecto por aspecto'],
   evolucion: ['Mi evolución', 'Cómo venís periodo a periodo'],
-  notas:     ['Notas del supervisor', 'Mensajes dejados en tu perfil'],
+  notas:     ['Notas', 'Mensajes dejados en tu perfil'],
   ajustes:   ['Ajustes', 'Perfil, apariencia y notificaciones']
 };
 
@@ -120,13 +120,13 @@ function pintarNotas() {
   const iconos = { nota: '📝', felicitacion: '🎉', atencion: '⚠️' };
   $('#v-notas').innerHTML = `<div class="card">
     <div class="flex"><div><h2 style="margin:0">Notas en tu perfil</h2>
-      <p class="sub" style="margin:3px 0 0">${VER ? 'Las notas que recibió esta persona.' : 'Lo que tu supervisora quiere que sepas.'}</p></div>
+      <p class="sub" style="margin:3px 0 0">${VER ? 'Las notas que recibió esta persona.' : 'Mensajes que te dejaron tu supervisión o la gerencia.'}</p></div>
       <div class="sp"></div>
       ${!VER && NOTAS.some((n) => !n.leida) ? '<button class="btn sm" id="btnLeidas">Marcar como leídas</button>' : ''}
     </div></div>
     ${NOTAS.length ? NOTAS.map((n) => `<div class="nota ${n.confirmada ? '' : 'nueva'}">
         <div style="font-size:14.5px">${iconos[n.tipo] || '📝'} ${esc(n.texto)}</div>
-        <div class="meta">${esc(n.autor || 'Supervisión')} · ${new Date(n.creada).toLocaleString('es-PY', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+        <div class="meta">${esc(firmaDe(n))} · ${new Date(n.creada).toLocaleString('es-PY', { dateStyle: 'medium', timeStyle: 'short' })}</div>
         <div class="confirmar" data-nota="${n.id}">${confirmacionHTML(n)}</div>
       </div>`).join('')
     : '<div class="card"><div class="vacio">Todavía no tenés notas.</div></div>'}`;
@@ -163,7 +163,7 @@ function activarConfirmaciones() {
       caja.innerHTML = confirmacionHTML(nota || { confirmada: r.confirmada, confirmacion: r.confirmacion });
       caja.closest('.nota').classList.remove('nueva');
       await cargarNotas(true);
-      toast('Confirmado — tu supervisora ya lo ve');
+      toast('Confirmado — ya figura como leída');
     } catch (e) {
       $$('[data-gesto]', caja).forEach((x) => (x.disabled = false));
       toast(e.message, true);

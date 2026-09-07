@@ -222,6 +222,14 @@ function analisisHTML(d) {
 /** ¿Esta persona puede hacer tal cosa? La gerencia siempre puede. */
 const puede = (yo, clave) => !!yo && (yo.rol === 'gerente' || (yo.permisos || []).includes(clave));
 
+/** Quién firma una nota: su nombre y su puesto. Si no cargó un puesto, se usa el rol. */
+const ROLES = { gerente: 'Gerencia', supervisor: 'Supervisión', agente: 'Agente', invitado: 'Invitado' };
+function firmaDe(n) {
+  const nombre = n.autor || 'Supervisión';
+  const cargo = (n.autor_puesto || '').trim() || ROLES[n.autor_rol] || '';
+  return cargo ? `${nombre} · ${cargo}` : nombre;
+}
+
 /** Un invitado entra a mirar: sin el permiso "editar" no ve campos ni botones de guardar. */
 const puedeEditar = (yo) => !!yo && (yo.rol !== 'invitado' || (yo.permisos || []).includes('editar'));
 

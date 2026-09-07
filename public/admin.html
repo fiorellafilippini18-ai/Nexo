@@ -27,7 +27,7 @@
       <button data-v="conclusiones"><span class="ic">▣</span>Conclusiones</button>
       <button data-v="destacados"><span class="ic">★</span>Destacados</button>
       <button data-v="cargar"><span class="ic">⭱</span>Cargar planilla</button>
-      <button data-v="notas"><span class="ic">✉</span>Notas al equipo</button>
+      <button data-v="notas"><span class="ic">✉</span>Notas<span class="badge rojo oculto" id="bMisNotas">0</span></button>
       <div class="grupo">Configuración</div>
       <button data-v="personas"><span class="ic">◉</span>Colaboradores<span class="badge" id="bPersonas">0</span></button>
       <button data-v="invitados"><span class="ic">◍</span>Invitados<span class="badge" id="bInvitados">0</span></button>
@@ -177,6 +177,7 @@
 
       <!-- ======== NOTAS ======== -->
       <section class="vista" id="v-notas">
+        <div id="ntMias"></div>
         <div class="card">
           <h2>Dejar una nota en un perfil</h2>
           <p class="sub">Le llega al instante y, si tiene el sonido activado, le suena una campanita.</p>

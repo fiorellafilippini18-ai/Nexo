@@ -331,8 +331,9 @@ app.get('/api/notas', pedirLogin, async (req, res) => {
   const objetivo = puedeVerOtros && req.query.usuarioId ? Number(req.query.usuarioId) : req.uid;
   if (objetivo !== req.uid && !puedeVerOtros) return res.status(403).json({ error: 'Sin permiso' });
   res.json(await all(
-    `SELECT n.*, a.nombre AS autor FROM notas n LEFT JOIN usuarios a ON a.id=n.autor_id
-     WHERE n.usuario_id=$1 ORDER BY n.creada DESC LIMIT 50`, [objetivo]));
+    `SELECT n.*, a.nombre AS autor, a.rol AS autor_rol, a.puesto AS autor_puesto
+       FROM notas n LEFT JOIN usuarios a ON a.id=n.autor_id
+      WHERE n.usuario_id=$1 ORDER BY n.creada DESC LIMIT 50`, [objetivo]));
 });
 
 app.post('/api/notas', pedirLogin, pedir('notas'), async (req, res) => {
@@ -370,7 +371,7 @@ app.get('/api/notas/enviadas', pedirLogin, pedir('notas'), async (req, res) => {
   res.json(await all(
     `SELECT n.id, n.texto, n.tipo, n.creada, n.leida, n.confirmada, n.confirmacion,
             u.id AS usuario_id, u.nombre, u.puesto, u.avatar, u.activo,
-            a.nombre AS autor
+            a.nombre AS autor, a.rol AS autor_rol, a.puesto AS autor_puesto
        FROM notas n
        JOIN usuarios u ON u.id = n.usuario_id
        LEFT JOIN usuarios a ON a.id = n.autor_id

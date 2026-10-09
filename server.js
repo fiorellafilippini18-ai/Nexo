@@ -772,14 +772,16 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
     await cliente.query('BEGIN');
 
     // 1. asegurar métricas
+    // Si el indicador ya existe, la planilla NO le cambia la configuración: la meta,
+    // la dirección y el "principal" se tocan desde Indicadores. Una carga mensual no
+    // tiene por qué reescribir cómo se evalúa al equipo.
     const mapaMetrica = {};
     for (const c of columnas) {
       if (!c.usar) continue;
       const r = await cliente.query(
         `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden, exime_supervision)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         ON CONFLICT (nombre) DO UPDATE SET unidad=EXCLUDED.unidad, direccion=EXCLUDED.direccion,
-           meta=EXCLUDED.meta, decimales=EXCLUDED.decimales, principal=EXCLUDED.principal, activa=TRUE
+         ON CONFLICT (nombre) DO UPDATE SET activa=TRUE
          RETURNING id`,
         [String(c.nombre).trim(), c.unidad || '', c.direccion === 'menor' ? 'menor' : 'mayor',
          c.meta === '' || c.meta === undefined ? null : c.meta, c.decimales ?? 1, !!c.principal, c.consejo || '', c.orden ?? 0,

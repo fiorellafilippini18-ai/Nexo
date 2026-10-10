@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 import { pool, q, one, all, migrate, norm } from './src/db.js';
 import { analizar, sugerir, claveIndicador, normTxt,
-         detectarPeriodo, leerFortalezas, leerConclusiones } from './src/parse.js';
+         detectarPeriodo, leerFortalezas, leerConclusiones, leerCriterios,
+        leerNarrativa, leerHojasPersona, resumenDeCriterios } from './src/parse.js';
 import { evaluar, destacados, cumple, conMetaDe, metaPropia, ESCALA } from './src/score.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,12 +218,57 @@ app.post('/api/vista-previa', pedirLogin, async (req, res) => {
   res.json({ ok: true, preview: { id: u.id, nombre: u.nombre, rol: u.rol } });
 });
 
+/* --- Qué secciones ve el equipo ---
+   Gerencia ve todo siempre. Para el resto, esta lista dice qué queda oculto:
+   sirve para publicar los números de un periodo sin mostrar todavía las
+   fortalezas, o para sacar una sección del menú mientras no se usa. */
+const SECCIONES = [
+  ['panel',      'Mis resultados'],
+  ['progreso',   'Progreso del mes'],
+  ['equipo',     'Resultados del equipo'],
+  ['analisis',   'Fortalezas y errores'],
+  ['detalle',    'Detalle por criterio'],
+  ['evolucion',  'Mi evolución'],
+  ['destacados', 'Destacados y podio'],
+  ['plus',       'Monto del plus'],
+  ['hoja',       'Hoja propia del periodo']
+];
+const CLAVES_SECCION = SECCIONES.map(([k]) => k);
+
+async function seccionesOcultas() {
+  const c = await one("SELECT valor FROM config WHERE clave='secciones_ocultas'");
+  try { const v = JSON.parse(c ? c.valor : '[]'); return Array.isArray(v) ? v.filter((x) => CLAVES_SECCION.includes(x)) : []; }
+  catch { return []; }
+}
+
+/** ¿Esta persona puede ver esta sección? La gestión no se ve afectada. */
+const ve = (req, ocultas, clave) => req.permisos.includes('ver_equipo') || !ocultas.includes(clave);
+
+app.get('/api/visibilidad', pedirLogin, async (req, res) => {
+  res.json({ secciones: SECCIONES, ocultas: await seccionesOcultas() });
+});
+
+app.put('/api/visibilidad', pedirLogin, pedir('personas'), async (req, res) => {
+  const lista = Array.isArray(req.body.ocultas) ? req.body.ocultas.filter((x) => CLAVES_SECCION.includes(x)) : [];
+  await q(`INSERT INTO config (clave, valor) VALUES ('secciones_ocultas',$1)
+           ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor`, [JSON.stringify(lista)]);
+  res.json({ ok: true, ocultas: lista });
+});
+
+/** Lo que se oculta de un periodo puntual (hoy: sus fortalezas y errores). */
+app.put('/api/periodos/:id/ocultas', pedirLogin, pedir('periodos'), async (req, res) => {
+  const lista = Array.isArray(req.body.ocultas) ? req.body.ocultas.filter((x) => CLAVES_SECCION.includes(x)) : [];
+  await q('UPDATE periodos SET ocultas=$1::jsonb WHERE id=$2', [JSON.stringify(lista), req.params.id]);
+  res.json({ ok: true, ocultas: lista });
+});
+
 app.get('/api/yo', pedirLogin, async (req, res) => {
   const u = await one(`SELECT id, usuario, nombre, puesto, email, turno, rol, debe_cambiar,
                               avatar, tema, escala, sonido, presencia, paleta
                        FROM usuarios WHERE id=$1`, [req.uid]);
   res.json({
     ...u, permisos: req.permisos, esGerente: u.rol === 'gerente', marca: await leerMarca(),
+    ocultas: req.permisos.includes('ver_equipo') ? [] : await seccionesOcultas(),
     // Si estoy mirando el sistema como otra persona, la pantalla lo tiene que decir
     preview: req.preview ? { id: req.preview.id, nombre: req.preview.nombre, rol: req.preview.rol } : null,
     real: req.preview ? { id: req.real.id, nombre: req.real.nombre } : null
@@ -244,6 +290,28 @@ async function leerMarca() {
 }
 
 app.get('/api/marca', async (req, res) => res.json(await leerMarca()));
+
+/* --- Monto del plus, editable --- */
+app.get('/api/plus', pedirLogin, async (req, res) => res.json(await montosPlus()));
+
+app.put('/api/plus', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const actual = await montosPlus();
+  const limpio = { agente: { ...actual.agente }, supervisor: { ...actual.supervisor } };
+  for (const rol of ['agente', 'supervisor']) {
+    const entra = req.body && req.body[rol];
+    if (!entra) continue;
+    for (const e of ESCALA) {
+      const v = entra[e.clave];
+      if (v === undefined) continue;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: `El monto de ${e.clave} no es válido` });
+      limpio[rol][e.clave] = Math.round(n);
+    }
+  }
+  await q(`INSERT INTO config (clave, valor) VALUES ('plus_montos',$1)
+           ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor`, [JSON.stringify(limpio)]);
+  res.json(limpio);
+});
 
 app.put('/api/marca', pedirLogin, pedir('marca'), async (req, res) => {
   const { marca, lema, paleta } = req.body;
@@ -480,6 +548,25 @@ app.post('/api/usuarios/:id/alias', pedirLogin, pedir('personas'), async (req, r
   await q('INSERT INTO alias (usuario_id, alias, alias_norm) VALUES ($1,$2,$3) ON CONFLICT (alias_norm) DO UPDATE SET usuario_id=$1',
     [req.params.id, a, norm(a)]);
   res.json({ ok: true });
+});
+
+/** Borrar un nombre de planilla suelto, o de una todos los que traen números
+ *  (los que quedaron de una planilla con una fila por chat). */
+app.delete('/api/usuarios/:id/alias', pedirLogin, pedir('personas'), async (req, res) => {
+  const u = await one('SELECT id, nombre FROM usuarios WHERE id=$1', [req.params.id]);
+  if (!u) return res.status(404).json({ error: 'Persona inexistente' });
+  let borrados;
+  if (req.query.modo === 'con-numeros') {
+    const r = await q(`DELETE FROM alias WHERE usuario_id=$1 AND alias ~ '[0-9]' RETURNING id`, [u.id]);
+    borrados = r.rowCount;
+  } else {
+    const a = String(req.body?.alias ?? req.query.alias ?? '').trim();
+    if (!a) return res.status(400).json({ error: 'Falta decir cuál' });
+    if (norm(a) === norm(u.nombre)) return res.status(400).json({ error: 'Ese es su propio nombre: no se puede quitar' });
+    const r = await q('DELETE FROM alias WHERE usuario_id=$1 AND alias_norm=$2 RETURNING id', [u.id, norm(a)]);
+    borrados = r.rowCount;
+  }
+  res.json({ ok: true, borrados });
 });
 
 /* ---------------------------------------------------------------
@@ -733,21 +820,50 @@ app.post('/api/analizar', pedirLogin, pedir('cargar'), upload.single('archivo'),
     }
     h.personasMapeadas = h.personas.map((p) => {
       const n = norm(p);
+      // Un nombre no lleva números. Si el texto trae dígitos ("Lucía 41110"), es el
+      // nombre pegado a un id de chat: la planilla trae una fila por conversación,
+      // no una por persona. No se empareja solo, para no mezclar todo en una misma.
+      const conNumeros = /\d/.test(p);
       const u = usuarios.find((x) => x.alias.includes(n) || norm(x.nombre) === n)
-        || usuarios.find((x) => norm(x.nombre).split(' ')[0] === n.split(' ')[0] && n.split(' ').length > 1);
-      return { texto: p, usuarioId: u ? u.id : null, sugerido: u ? u.nombre : null };
+        || (conNumeros ? null
+            : usuarios.find((x) => norm(x.nombre).split(' ')[0] === n.split(' ')[0] && n.split(' ').length > 1));
+      return { texto: p, usuarioId: u ? u.id : null, sugerido: u ? u.nombre : null, conNumeros };
     });
   }
 
   // La planilla dice de qué fechas habla y trae el análisis ya escrito:
   // lo detectamos acá para mostrarlo antes de guardar nada.
   info.periodoDetectado = detectarPeriodo(req.file.buffer);
+  const equipo = usuarios.map((u) => ({ id: u.id, nombre: u.nombre, alias: u.alias }));
   const forta = leerFortalezas(req.file.buffer);
-  const conclu = leerConclusiones(req.file.buffer);
+  const conclu = leerConclusiones(req.file.buffer, equipo);
+  /* No todos los archivos traen la hoja "Fortalezas y Errores". Cuando falta,
+     se lee lo que el Dashboard dice de cada persona. */
+  const narra = forta.length ? [] : leerNarrativa(req.file.buffer, equipo);
+  const hojas = leerHojasPersona(req.file.buffer, equipo);
+
+  /* Calidad por criterio: viene transpuesta (un criterio por fila, un agente por
+     columna), así que se lee aparte y se empareja acá con las personas del sistema. */
+  // Se le pasa el equipo real: así una columna "Beatriz" se reconoce como ella,
+  // y un encabezado como "Motivo de contacto" no se confunde con una persona.
+  const crit = leerCriterios(req.file.buffer, equipo);
+  info.criterios = crit ? {
+    hoja: crit.hoja,
+    nombres: crit.criterios.map((c) => c.nombre),
+    filas: crit.criterios,
+    personas: crit.personas,
+    usar: true
+  } : null;
+
   info.extras = {
     fortalezas: forta.length,
     conclusiones: conclu.length,
-    personasFortalezas: forta.map((f) => f.persona)
+    personasFortalezas: forta.map((f) => f.persona),
+    criterios: crit ? crit.criterios.length : 0,
+    // De dónde va a salir el análisis de cada persona y qué hojas propias trae
+    narrativa: narra.length,
+    personasNarrativa: narra.map((f) => f.persona),
+    hojas: hojas.map((h) => ({ hoja: h.hoja, persona: h.persona, usuarioId: h.usuarioId, bloques: h.bloques.length }))
   };
 
   // guardamos el archivo en la sesión para el paso 2
@@ -756,7 +872,7 @@ app.post('/api/analizar', pedirLogin, pedir('cargar'), upload.single('archivo'),
 });
 
 app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
-  const { periodoId, hoja, columnas = [], personas = [] } = req.body;
+  const { periodoId, hoja, columnas = [], personas = [], criterios = null } = req.body;
   const per = await one('SELECT * FROM periodos WHERE id=$1', [periodoId]);
   if (!per) return res.status(400).json({ error: 'Periodo inexistente' });
   const pend = req.session.pendiente;
@@ -767,7 +883,7 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
   if (!h) return res.status(400).json({ error: 'No encuentro esa hoja en el archivo' });
 
   const cliente = await pool.connect();
-  let filas = 0, personasOk = 0;
+  let filas = 0, personasOk = 0, criteriosOk = 0, hojasOk = 0;
   try {
     await cliente.query('BEGIN');
 
@@ -790,10 +906,13 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
     }
 
     // 2. resolver personas (creando alias para que la próxima vez sea automático)
+    //    Solo se recuerda el texto si parece un nombre: uno que trae números es
+    //    "nombre + id de chat" y guardarlo llenaría la ficha de basura.
     const mapaPersona = {};
     for (const p of personas) {
       if (!p.usuarioId) continue;
       mapaPersona[p.texto] = p.usuarioId;
+      if (/\d/.test(p.texto)) continue;
       await cliente.query(
         'INSERT INTO alias (usuario_id, alias, alias_norm) VALUES ($1,$2,$3) ON CONFLICT (alias_norm) DO UPDATE SET usuario_id=$1',
         [p.usuarioId, p.texto, norm(p.texto)]);
@@ -818,24 +937,104 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
 
     // 4. el análisis escrito que ya viene en la planilla
     const buf0 = Buffer.from(pend.b64, 'base64');
+    /* El equipo real, para saber de quién habla cada frase del archivo. Van
+       todos los activos y no solo los de esta carga: una hoja puede estar
+       dedicada a alguien que no figura en la tabla resumen. Los nombres de
+       cuenta que no son personas —"Gerencia"— los descarta el propio lector,
+       porque si no, cada "según la regla de Gerencia" iría a su ficha. */
+    const usuarios0 = await all('SELECT id, nombre FROM usuarios WHERE activo');
+    const aliasTodos = await all('SELECT usuario_id, alias FROM alias');
+    const equipo0 = usuarios0.map((u) => ({
+      id: u.id, nombre: u.nombre,
+      alias: aliasTodos.filter((a) => a.usuario_id === u.id).map((a) => a.alias)
+    }));
+    /** El id de una persona, por el texto con el que la nombra la planilla. */
+    const idDe = (texto, usuarioId) => usuarioId
+      || mapaPersona[texto]
+      || Object.entries(mapaPersona).find(([t]) => norm(t) === norm(texto))?.[1]
+      || equipo0.find((u) => norm(u.nombre) === norm(texto))?.id
+      || null;
+
+    /* Fortalezas y errores. Primero la hoja dedicada; si el archivo no la trae,
+       lo que el Dashboard dice de cada persona; y si de alguien no dice nada,
+       el orden de sus propios puntajes por criterio. En los tres casos se
+       anota de dónde salió, para que la pantalla lo aclare. */
     const forta = leerFortalezas(buf0);
-    for (const f of forta) {
-      const uid = mapaPersona[f.persona]
-        || Object.entries(mapaPersona).find(([texto]) => norm(texto) === norm(f.persona))?.[1];
-      if (!uid) continue;
-      await cliente.query(
-        `INSERT INTO analisis (periodo_id, usuario_id, fortalezas, errores) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (periodo_id, usuario_id)
-         DO UPDATE SET fortalezas=EXCLUDED.fortalezas, errores=EXCLUDED.errores`,
-        [periodoId, uid, f.fortalezas || '', f.errores || '']);
+    const porFuente = [
+      ['hoja', forta],
+      ['dashboard', forta.length ? [] : leerNarrativa(buf0, equipo0)],
+      ['criterios', resumenDeCriterios(
+        criterios && criterios.usar && Array.isArray(criterios.filas)
+          ? { criterios: criterios.filas, personas: criterios.personas || [] }
+          : leerCriterios(buf0, equipo0))]
+    ];
+    const yaConAnalisis = new Set();
+    for (const [fuente, lista] of porFuente) {
+      for (const f of lista) {
+        const uid = idDe(f.persona, f.usuarioId);
+        if (!uid || yaConAnalisis.has(uid)) continue;
+        if (!String(f.fortalezas || '').trim() && !String(f.errores || '').trim()) continue;
+        yaConAnalisis.add(uid);
+        await cliente.query(
+          `INSERT INTO analisis (periodo_id, usuario_id, fortalezas, errores, fuente) VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (periodo_id, usuario_id)
+           DO UPDATE SET fortalezas=EXCLUDED.fortalezas, errores=EXCLUDED.errores, fuente=EXCLUDED.fuente`,
+          [periodoId, uid, f.fortalezas || '', f.errores || '', fuente]);
+      }
     }
-    const conclu = leerConclusiones(buf0);
+
+    /* Conclusiones para Gerencia: se refrescan en cada carga. Si el archivo no
+       trae ninguna, se dejan las que estaban (puede haberlas escrito alguien a
+       mano desde la pantalla). */
+    const conclu = leerConclusiones(buf0, equipo0);
     if (conclu.length) {
       await cliente.query('DELETE FROM conclusiones WHERE periodo_id=$1', [periodoId]);
       for (let i = 0; i < conclu.length; i++) {
         await cliente.query(
           'INSERT INTO conclusiones (periodo_id, orden, titulo, cuerpo) VALUES ($1,$2,$3,$4)',
-          [periodoId, i, conclu[i].titulo, conclu[i].cuerpo || '']);
+          [periodoId, i, String(conclu[i].titulo).slice(0, 300), String(conclu[i].cuerpo || '').slice(0, 4000)]);
+      }
+    }
+
+    /* 4d. Hojas propias: la revisión que la planilla le dedica a una persona.
+       Se guarda leída por bloques, así aguanta que el Excel cambie de formato
+       de un mes al otro. */
+    for (const h of leerHojasPersona(buf0, equipo0)) {
+      const uid = idDe(h.persona, h.usuarioId);
+      if (!uid || !h.bloques.length) continue;
+      await cliente.query(
+        `INSERT INTO hojas_persona (periodo_id, usuario_id, hoja, titulo, bloques)
+         VALUES ($1,$2,$3,$4,$5::jsonb)
+         ON CONFLICT (periodo_id, usuario_id)
+         DO UPDATE SET hoja=EXCLUDED.hoja, titulo=EXCLUDED.titulo, bloques=EXCLUDED.bloques`,
+        [periodoId, uid, h.hoja, h.titulo || '', JSON.stringify(h.bloques)]);
+      hojasOk++;
+    }
+
+    // 4c. calidad por criterio: la tabla transpuesta del desglose.
+    // Cada criterio entra como indicador secundario, así alimenta el
+    // "Detalle por criterio" que cada persona ya tiene en su panel.
+    if (criterios && Array.isArray(criterios.filas) && criterios.filas.length) {
+      const deTexto = {};
+      for (const p of (criterios.personas || [])) if (p.usuarioId) deTexto[p.texto] = p.usuarioId;
+      for (const c of criterios.filas) {
+        const nombre = String(c.nombre || '').trim();
+        if (!nombre) continue;
+        const r = await cliente.query(
+          `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden)
+           VALUES ($1,'puntos','mayor',NULL,2,FALSE,'',50)
+           ON CONFLICT (nombre) DO UPDATE SET activa=TRUE
+           RETURNING id`, [nombre]);
+        const mid = r.rows[0].id;
+        for (const [texto, valor] of Object.entries(c.valores || {})) {
+          const uid = deTexto[texto];
+          if (!uid || valor === null || valor === undefined) continue;
+          await cliente.query(
+            `INSERT INTO resultados (periodo_id, usuario_id, metrica_id, valor) VALUES ($1,$2,$3,$4)
+             ON CONFLICT (periodo_id, usuario_id, metrica_id) DO UPDATE SET valor=EXCLUDED.valor`,
+            [periodoId, uid, mid, valor]);
+          criteriosOk++;
+        }
       }
     }
 
@@ -866,7 +1065,7 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
   }
 
   delete req.session.pendiente;
-  res.json({ ok: true, valores: filas, personas: personasOk });
+  res.json({ ok: true, valores: filas, personas: personasOk, criterios: criteriosOk, hojas: hojasOk });
 });
 
 app.get('/api/periodos/:id/archivo', pedirLogin, pedirGestion, async (req, res) => {
@@ -890,6 +1089,34 @@ async function metricasDe(periodoId) {
     ? { ...m, meta: mapa.get(m.id), meta_general: m.meta, meta_propia: true }
     : { ...m, meta_general: m.meta, meta_propia: false }));
 }
+
+/* --- Monto del plus ---
+   Lo define cuántos indicadores principales cumplió, y la escala es distinta
+   según el rol: un asesor cobra 600.000 con los 3 y la mitad con 2; la
+   supervisión tiene la suya. El monto de cada quien es dato sensible: solo lo
+   ve esa persona y quien pueda ver al equipo. */
+const PLUS_POR_DEFECTO = {
+  agente:     { EXCELENTE: 600000, BUENO: 300000, MALO: 0, 'CRÍTICO': 0 },
+  supervisor: { EXCELENTE: 800000, BUENO: 400000, MALO: 0, 'CRÍTICO': 0 }
+};
+
+async function montosPlus() {
+  const c = await one("SELECT valor FROM config WHERE clave='plus_montos'");
+  if (!c) return PLUS_POR_DEFECTO;
+  try {
+    const v = JSON.parse(c.valor);
+    return { agente: { ...PLUS_POR_DEFECTO.agente, ...(v.agente || {}) },
+             supervisor: { ...PLUS_POR_DEFECTO.supervisor, ...(v.supervisor || {}) } };
+  } catch { return PLUS_POR_DEFECTO; }
+}
+
+/** El plus que le corresponde a una persona según su nivel y su rol. */
+const plusDe = (montos, rol, nivel) => {
+  if (!nivel) return null;
+  const tabla = montos[rol === 'supervisor' ? 'supervisor' : 'agente'];
+  const monto = tabla[nivel.clave];
+  return monto === undefined ? null : Number(monto);
+};
 
 async function datosPeriodo(periodoId) {
   const metricas = await metricasDe(periodoId);
@@ -961,11 +1188,18 @@ app.get('/api/mi-desempeno/:periodoId', pedirLogin, async (req, res) => {
   }
 
   const comentario = await one('SELECT texto FROM comentarios WHERE periodo_id=$1 AND usuario_id=$2', [per.id, objetivo]);
-  const persona = await one('SELECT nombre, puesto, avatar FROM usuarios WHERE id=$1', [objetivo]);
+  const persona = await one('SELECT nombre, puesto, avatar, rol FROM usuarios WHERE id=$1', [objetivo]);
+
+  // El monto del plus: cada quien ve el suyo, y la gestión ve el de todos.
+  // Si Gerencia lo ocultó, no se manda al navegador siquiera.
+  const montos = await montosPlus();
+  const ocultasG = await seccionesOcultas();
+  const plus = ve(req, ocultasG, 'plus')
+    ? plusDe(montos, persona ? persona.rol : 'agente', evalu.nivel) : null;
 
   res.json({
     periodo: per, persona, escala: ESCALA, ...evalu,
-    posicion, deCuantos: todos.length,
+    posicion, deCuantos: todos.length, plus,
     historial, comentario: comentario ? comentario.texto : '',
     sinDatos: !yo
   });
@@ -1041,8 +1275,15 @@ app.get('/api/equipo/:periodoId', pedirLogin, async (req, res) => {
     return res.status(403).json({ error: 'Ese periodo no está disponible' });
   }
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
+  const montos = await montosPlus();
+  const verPlus = ve(req, await seccionesOcultas(), 'plus');
   const filas = Object.values(porUsuario)
-    .map((u) => ({ ...u, ...evaluar(metricas, u.valores, promedios, u) }))
+    .map((u) => {
+      const ev = evaluar(metricas, u.valores, promedios, u);
+      // El plus de la supervisión es solo suyo: no se muestra en la tabla del equipo.
+      const propio = u.rol === 'supervisor' && u.id !== req.uid && !req.permisos.includes('ver_equipo');
+      return { ...u, ...ev, plus: (propio || !verPlus) ? null : plusDe(montos, u.rol, ev.nivel) };
+    })
     .sort((a, b) => b.ratio - a.ratio);
   const resumen = {};
   for (const e of ESCALA) resumen[e.clave] = filas.filter((f) => f.nivel && f.nivel.clave === e.clave).length;
@@ -1181,6 +1422,14 @@ app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
   const v = await periodoVisible(req, req.params.periodoId);
   if (v.error) return res.status(v.error).json({ error: v.msg });
 
+  // Oculto para el equipo: ni global ni para este periodo en particular.
+  const ocultasGlobal = await seccionesOcultas();
+  const delPeriodo = Array.isArray(v.per.ocultas) ? v.per.ocultas : [];
+  if (!req.permisos.includes('ver_equipo')
+      && (ocultasGlobal.includes('analisis') || delPeriodo.includes('analisis'))) {
+    return res.json({ periodo: v.per, filas: [], completo: false, oculto: true });
+  }
+
   // ¿ve el de todos, o solo el suyo?
   const todos = req.permisos.includes('analisis_equipo');
 
@@ -1191,7 +1440,7 @@ app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
   const quien = mirando || req.uid;
 
   const filas = await all(
-    `SELECT a.usuario_id, a.fortalezas, a.errores, u.nombre, u.puesto, u.avatar, u.activo
+    `SELECT a.usuario_id, a.fortalezas, a.errores, a.fuente, u.nombre, u.puesto, u.avatar, u.activo
        FROM analisis a JOIN usuarios u ON u.id = a.usuario_id
       WHERE a.periodo_id = $1 ${todos && !mirando ? '' : 'AND a.usuario_id = $2'}
       ORDER BY u.nombre`,
@@ -1202,6 +1451,108 @@ app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
     completo: todos && !mirando,
     filas: filas.map((f) => ({ ...f, nombre: etiquetaNombre(f), esMio: f.usuario_id === quien }))
   });
+});
+
+/* ---------------------------------------------------------------
+   Hoja propia del periodo.
+
+   Algunas personas tienen en la planilla una hoja dedicada: sus
+   indicadores del cargo, qué cumple y qué no, y qué hacer el mes
+   que viene. Es información sensible —ahí está su plus— así que
+   la ve esa persona, la gerencia, y quien ella autorice.
+--------------------------------------------------------------- */
+
+/** Las personas autorizadas a ver la hoja de alguien. */
+const autorizadosDe = (duenoId) =>
+  all(`SELECT h.usuario_id, u.nombre, u.puesto, u.avatar
+         FROM hoja_autorizados h JOIN usuarios u ON u.id = h.usuario_id
+        WHERE h.dueno_id = $1 ORDER BY u.nombre`, [duenoId]);
+
+/** ¿Puedo ver la hoja de esta persona? */
+async function puedeVerHoja(req, duenoId) {
+  if (duenoId === req.uid) return true;
+  if (req.permisos.includes('ver_equipo')) return true;
+  const fila = await one('SELECT 1 FROM hoja_autorizados WHERE dueno_id=$1 AND usuario_id=$2', [duenoId, req.uid]);
+  return !!fila;
+}
+
+/** ¿Puedo decidir quién ve la hoja de esta persona? Su dueño, o Gerencia. */
+const puedeDarHoja = (req, duenoId) => duenoId === req.uid || req.permisos.includes('personas');
+
+app.get('/api/hoja/:periodoId', pedirLogin, async (req, res) => {
+  const v = await periodoVisible(req, req.params.periodoId);
+  if (v.error) return res.status(v.error).json({ error: v.msg });
+
+  const dueno = Number(req.query.usuarioId) || req.uid;
+  if (!await puedeVerHoja(req, dueno)) {
+    return res.status(403).json({ error: 'Esa hoja es privada' });
+  }
+
+  // Gerencia puede tenerla oculta para el equipo, en general o en este periodo
+  const ocultasGlobal = await seccionesOcultas();
+  const delPeriodo = Array.isArray(v.per.ocultas) ? v.per.ocultas : [];
+  if (!req.permisos.includes('ver_equipo')
+      && (ocultasGlobal.includes('hoja') || delPeriodo.includes('hoja'))) {
+    return res.json({ periodo: v.per, hoja: null, oculto: true });
+  }
+
+  const h = await one(
+    `SELECT p.hoja, p.titulo, p.bloques, u.nombre, u.puesto
+       FROM hojas_persona p JOIN usuarios u ON u.id = p.usuario_id
+      WHERE p.periodo_id=$1 AND p.usuario_id=$2`, [v.per.id, dueno]);
+
+  res.json({
+    periodo: v.per,
+    hoja: h ? { ...h, bloques: Array.isArray(h.bloques) ? h.bloques : [] } : null,
+    esMia: dueno === req.uid,
+    puedeDar: puedeDarHoja(req, dueno),
+    autorizados: puedeDarHoja(req, dueno) ? await autorizadosDe(dueno) : []
+  });
+});
+
+/** En qué periodos esta persona tiene hoja propia: así el menú aparece solo
+ *  cuando hay algo que mostrar. */
+app.get('/api/hoja', pedirLogin, async (req, res) => {
+  const dueno = Number(req.query.usuarioId) || req.uid;
+  if (!await puedeVerHoja(req, dueno)) return res.json({ periodos: [] });
+  const gestion = req.permisos.includes('ver_equipo');
+  const filas = await all(
+    `SELECT p.periodo_id FROM hojas_persona p JOIN periodos per ON per.id = p.periodo_id
+      WHERE p.usuario_id=$1 ${gestion ? '' : 'AND per.publicado AND NOT per.archivado'}`, [dueno]);
+  res.json({ periodos: filas.map((f) => f.periodo_id) });
+});
+
+app.get('/api/hoja-autorizados/:usuarioId', pedirLogin, async (req, res) => {
+  const dueno = Number(req.params.usuarioId);
+  if (!dueno) return res.status(400).json({ error: 'Falta la persona' });
+  if (!puedeDarHoja(req, dueno)) return res.status(403).json({ error: 'No podés ver esos permisos' });
+  const tiene = await one('SELECT COUNT(*)::int AS n FROM hojas_persona WHERE usuario_id=$1', [dueno]);
+  res.json({ autorizados: await autorizadosDe(dueno), hojas: tiene ? tiene.n : 0 });
+});
+
+app.put('/api/hoja-autorizados/:usuarioId', pedirLogin, async (req, res) => {
+  const dueno = Number(req.params.usuarioId);
+  if (!dueno) return res.status(400).json({ error: 'Falta la persona' });
+  if (!puedeDarHoja(req, dueno)) {
+    return res.status(403).json({ error: 'Solo esa persona o la gerencia deciden quién ve su hoja' });
+  }
+  const lista = (Array.isArray(req.body.usuarios) ? req.body.usuarios : [])
+    .map((x) => Number(x)).filter((x) => x && x !== dueno);
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('BEGIN');
+    await cliente.query('DELETE FROM hoja_autorizados WHERE dueno_id=$1', [dueno]);
+    for (const uid of [...new Set(lista)]) {
+      await cliente.query(
+        'INSERT INTO hoja_autorizados (dueno_id, usuario_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+        [dueno, uid]);
+    }
+    await cliente.query('COMMIT');
+  } catch (e) {
+    await cliente.query('ROLLBACK');
+    return res.status(500).json({ error: e.message });
+  } finally { cliente.release(); }
+  res.json({ ok: true, autorizados: await autorizadosDe(dueno) });
 });
 
 app.get('/api/conclusiones/:periodoId', pedirLogin, pedir('conclusiones'), async (req, res) => {

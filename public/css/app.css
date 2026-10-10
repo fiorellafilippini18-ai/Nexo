@@ -435,8 +435,9 @@ tr.editor td{background:var(--surface-2)}
 .permiso:hover{border-color:var(--primary)}
 .permiso:has(input:checked){border-color:var(--primary);background:var(--primary-suave)}
 .permiso input{width:18px;height:18px;margin-top:1px;flex:0 0 auto;accent-color:var(--primary)}
-.permiso b{display:block;font-size:13.5px;font-weight:600;line-height:1.35}
-.permiso small{color:var(--muted);font-size:11.5px;font-family:ui-monospace,monospace}
+.permiso span{min-width:0;overflow-wrap:anywhere}
+.permiso b{display:block;font-size:13.5px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.permiso small{display:block;color:var(--muted);font-size:11.5px;font-family:ui-monospace,monospace;overflow-wrap:anywhere}
 
 /* Metas propias de una persona, dentro del editor de colaboradores */
 .metas-propias{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
@@ -677,6 +678,9 @@ td, th{overflow-wrap:break-word}
 .barra-guardar{position:sticky;bottom:0;background:var(--surface);border-top:2px solid var(--primary);
   padding:13px 16px;margin:18px -22px -22px;border-radius:0 0 var(--radius) var(--radius);
   display:flex;align-items:center;gap:11px;flex-wrap:wrap;z-index:5}
+/* La barra sangra hasta el borde de la tarjeta. Si cuelga de un div interno,
+   esa sangría se le sale: ahí se queda dentro de su caja. */
+:not(.card) > .barra-guardar{margin-left:0;margin-right:0;margin-bottom:0;border-radius:var(--radius-sm)}
 .barra-guardar .pendiente{font-size:13px;color:var(--warning-ink);background:var(--warning-bg);
   border:1px solid var(--warning);border-radius:20px;padding:4px 12px;font-weight:600}
 
@@ -714,3 +718,48 @@ body.modo-preview .btn.primary, body.modo-preview .btn.danger{opacity:.5;pointer
 #eqTabla .who small{white-space:nowrap}
 #eqTabla td:last-child{white-space:nowrap;padding-left:4px;text-align:right}
 #eqTabla td:last-child .btn{padding:5px 9px;font-size:12px}
+
+/* Nombres con los que una persona aparece en la planilla */
+.alias-lista{display:flex;flex-wrap:wrap;gap:7px}
+.alias-chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 6px 4px 11px;
+  border:1px solid var(--border);border-radius:20px;background:var(--surface);max-width:100%;
+  overflow-wrap:anywhere}
+.alias-chip.sucio{border-color:color-mix(in srgb, var(--warning) 55%, transparent);background:var(--warning-bg);color:var(--warning-ink)}
+.alias-chip button{border:0;background:transparent;cursor:pointer;font-size:15px;line-height:1;
+  padding:0 4px;color:inherit;opacity:.65;border-radius:50%}
+.alias-chip button:hover{opacity:1;background:var(--surface-2)}
+
+/* =========================================================
+   Hoja propia del periodo.
+   La planilla cambia de formato mes a mes, así que la pantalla
+   tiene que verse bien con cualquier combinación de títulos,
+   párrafos y tablas, en cualquier orden.
+   ========================================================= */
+.hoja-propia .hp-titulo{font-size:14px;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);margin:26px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+.hoja-propia .hp-titulo:first-of-type{margin-top:18px}
+.hoja-propia .hp-p{margin:0 0 10px;line-height:1.55;font-size:14.5px;overflow-wrap:anywhere}
+.hoja-propia .hp-p.hp-si{border-left:3px solid var(--good);padding-left:12px}
+.hoja-propia .hp-p.hp-no{border-left:3px solid var(--critical);padding-left:12px}
+.hoja-propia .hp-p.hp-neutro{border-left:3px solid var(--border);padding-left:12px;color:var(--muted)}
+.hoja-propia .hp-tabla{margin:4px 0 18px}
+.hoja-propia .hp-tabla td{vertical-align:top;line-height:1.45}
+.hoja-propia .hp-tabla td:first-child{font-weight:600}
+.hoja-propia .hp-tabla tr.hp-detalle td{font-weight:400;color:var(--muted);font-size:13px;
+  padding-top:0;padding-bottom:12px;border-top:0;white-space:normal}
+.hoja-propia .hp-tabla th{white-space:normal;line-height:1.25;vertical-align:bottom}
+
+/* Quién más puede ver la hoja */
+#cardHojaPermisos .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px}
+#cardHojaPermisos .chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;
+  padding:4px 6px 4px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface)}
+#cardHojaPermisos .chip .x{border:0;background:transparent;cursor:pointer;font-size:15px;
+  line-height:1;padding:0 4px;color:inherit;opacity:.65;border-radius:50%}
+#cardHojaPermisos .chip .x:hover{opacity:1;background:var(--surface-2)}
+
+/* Fortalezas y errores: cuando el archivo trae varias frases, van en lista. */
+.an-lista{margin:0;padding-left:18px}
+.an-lista li{margin:0 0 7px;line-height:1.5}
+.an-lista li:last-child{margin-bottom:0}
+.tabla-analisis .an-lista{padding-left:16px;font-size:13.5px}
+.tabla-analisis .an-lista li{margin-bottom:5px}

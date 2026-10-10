@@ -1,6 +1,6 @@
 /* Pantalla del colaborador. */
 let YO = null, PERIODOS = [], ACTUAL = null, DATOS = null, NOTAS = [], VISTA = 'panel';
-let PODIO = null, PALMARES = null, EQUIPO = null, PROGRESO = null, ANALISIS = null;
+let PODIO = null, PALMARES = null, EQUIPO = null, PROGRESO = null, ANALISIS = null, HOJA = null;
 let ultimaNotaVista = null;
 
 /* Modo "ver como": la supervisión abre /mi-panel?ver=<id> para mirar el panel
@@ -14,6 +14,7 @@ const TITULOS = {
   panel:     ['Mis resultados', 'Cómo te fue en el periodo'],
   progreso:  ['Mi progreso del mes', 'Cuánto te falta para la meta'],
   analisis:  ['Fortalezas y errores', 'Lo que hacés bien y lo que tenés que corregir'],
+  hoja:      ['Mi hoja del periodo', 'Tus indicadores del cargo, qué cumplís y qué hacer'],
   equipo:    ['Resultados del equipo', 'Cómo le fue a todo el equipo en el periodo'],
   detalle:   ['Detalle por criterio', 'Aspecto por aspecto'],
   evolucion: ['Mi evolución', 'Cómo venís periodo a periodo'],
@@ -41,6 +42,11 @@ async function iniciar() {
       try { await api('/api/vista-previa', { method: 'POST', body: { usuarioId: null } }); } catch (x) { /* igual salimos */ }
       location.href = '/admin?v=personas';
     });
+  }
+
+  // Lo que Gerencia decidió no mostrarle al equipo sale del menú
+  for (const clave of (YO.ocultas || [])) {
+    const b = $(`#nav button[data-v="${clave}"]`); if (b) b.remove();
   }
 
   if (VER) {
@@ -81,15 +87,22 @@ function tituloDe(v) {
 }
 
 async function cargar() {
-  const [d, podio, palmares, equipo, progreso, analisis] = await Promise.all([
+  const [d, podio, palmares, equipo, progreso, analisis, hoja] = await Promise.all([
     api('/api/mi-desempeno/' + ACTUAL + qs()),
     api('/api/destacados/' + ACTUAL).catch(() => null),
     api('/api/palmares' + qs()).catch(() => null),
     api('/api/equipo/' + ACTUAL).catch(() => null),
     api('/api/progreso/' + ACTUAL + qs()).catch(() => null),
-    api('/api/analisis/' + ACTUAL + qs()).catch(() => null)
+    api('/api/analisis/' + ACTUAL + qs()).catch(() => null),
+    api('/api/hoja/' + ACTUAL + qs()).catch(() => null)
   ]);
-  DATOS = d; PODIO = podio; PALMARES = palmares; EQUIPO = equipo; PROGRESO = progreso; ANALISIS = analisis;
+  DATOS = d; PODIO = podio; PALMARES = palmares; EQUIPO = equipo; PROGRESO = progreso; ANALISIS = analisis; HOJA = hoja;
+
+  /* La hoja propia solo existe para algunas personas: si en este periodo no
+     tiene ninguna, el menú no la muestra. */
+  const bh = $('#bHoja');
+  if (bh) bh.classList.toggle('oculto', !(hoja && hoja.hoja));
+  if (VISTA === 'hoja' && !(hoja && hoja.hoja)) VISTA = 'panel';
   if (VER && d.persona) {
     $('#verNombre').textContent = d.persona.nombre;
     document.title = 'Panel de ' + d.persona.nombre;
@@ -215,7 +228,9 @@ function pintar() {
     html += `<div class="resultado ${n.color}">
       <div class="lbl">Tu resultado — ${esc(d.periodo.etiqueta)}</div>
       <div class="big">${esc(n.clave)}</div>
-      <div class="plus">${esc(n.plus)}</div>
+      <div class="plus">${d.plus === null || d.plus === undefined
+        ? esc(n.plus)
+        : (d.plus > 0 ? `Te corresponde un plus de <b>${gs(d.plus)}</b>` : 'Este periodo no te corresponde plus')}</div>
       <div class="desc">${esc(n.desc)} Cumpliste <b>${d.cumplidos} de ${d.total}</b> indicadores principales.</div>
     </div>`;
   }
@@ -331,14 +346,15 @@ function pintarEquipo() {
         <small>${esc(f.puesto || '')}</small></div></div></td>
       ${principales.map((m) => {
         const det = f.detalle.find((x) => x.id === m.id);
-        return `<td class="num">${det && det.valor !== null
-          ? `${nfmt(det.valor, m.decimales)} ${det.cumple
-              ? '<span style="color:var(--good)">✓</span>'
-              : '<span style="color:var(--critical)">✕</span>'}`
-          : '—'}</td>`;
+        if (!det || det.valor === null) return '<td class="num">—</td>';
+        const marca = det.exento ? '<span style="color:var(--muted)" title="No se le exige">·</span>'
+          : det.cumple ? '<span style="color:var(--good)">✓</span>'
+                       : '<span style="color:var(--critical)">✕</span>';
+        return `<td class="num">${nfmt(det.valor, m.decimales)} ${marca}</td>`;
       }).join('')}
       <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
+      <td class="num">${f.plus === null || f.plus === undefined ? '—' : (f.plus > 0 ? `<b>${gs(f.plus)}</b>` : 'sin plus')}</td>
     </tr>`;
 
   caja.innerHTML = `<div class="card">
@@ -347,9 +363,45 @@ function pintarEquipo() {
     <div class="scroll"><div id="eqTabla"><table><thead><tr>
       <th>Colaborador</th>
       ${principales.map((m) => `<th class="num" title="${esc(m.nombre)}">${esc(tituloCorto(m.nombre))}</th>`).join('')}
-      <th class="num">Cumplidos</th><th>Resultado</th>
+      <th class="num">Cumplidos</th><th>Resultado</th><th class="num">Plus</th>
     </tr></thead><tbody>${EQUIPO.filas.map(fila).join('')}</tbody></table></div></div>
   </div>`;
+}
+
+/* Quién más puede leer la hoja: lo decide su dueño (o la gerencia). */
+function activarPermisosHoja() {
+  const caja = $('#cardHojaPermisos');
+  if (!caja || !HOJA || !HOJA.puedeDar) return;
+  const dueno = dePanel();
+
+  const guardar = async (ids) => {
+    try {
+      const r = await api('/api/hoja-autorizados/' + dueno, { method: 'PUT', body: { usuarios: ids } });
+      HOJA.autorizados = r.autorizados;
+      $('#v-hoja').innerHTML = hojaHTML(HOJA, !VER);
+      activarPermisosHoja();
+      toast('Permisos actualizados');
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const puestos = (EQUIPO && EQUIPO.filas ? EQUIPO.filas : [])
+    .filter((f) => f.id !== dueno && !(HOJA.autorizados || []).some((a) => a.usuario_id === f.id));
+  const sel = $('#hojaAgregar');
+  if (sel) {
+    sel.innerHTML = puestos.length
+      ? puestos.map((f) => `<option value="${f.id}">${esc(f.nombre)}${f.puesto ? ' — ' + esc(f.puesto) : ''}</option>`).join('')
+      : '<option value="">No queda nadie por agregar</option>';
+  }
+  const btn = $('#btnHojaAgregar');
+  if (btn) btn.addEventListener('click', () => {
+    const id = Number(sel && sel.value);
+    if (!id) return;
+    guardar([...(HOJA.autorizados || []).map((a) => a.usuario_id), id]);
+  });
+  $$('#hojaChips [data-quitar]').forEach((b) => b.addEventListener('click', () => {
+    const fuera = Number(b.dataset.quitar);
+    guardar((HOJA.autorizados || []).map((a) => a.usuario_id).filter((x) => x !== fuera));
+  }));
 }
 
 function ir(v) {
@@ -364,6 +416,10 @@ function ir(v) {
   if (v === 'equipo') pintarEquipo();
   if (v === 'progreso') $('#v-progreso').innerHTML = progresoHTML(PROGRESO);
   if (v === 'analisis') $('#v-analisis').innerHTML = analisisHTML(ANALISIS);
+  if (v === 'hoja') {
+    $('#v-hoja').innerHTML = hojaHTML(HOJA, !VER);
+    activarPermisosHoja();
+  }
   if (v === 'ajustes') {
     $('#v-ajustes').innerHTML = panelAjustes(YO);
     activarAjustes(YO, pintarIdentidad);

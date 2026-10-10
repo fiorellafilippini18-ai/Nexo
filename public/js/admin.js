@@ -14,6 +14,7 @@ const TITULOS = {
   invitados:   ['Invitados', 'Quién entra solo a mirar, con qué permisos'],
   indicadores: ['Indicadores', 'Metas y consejos de mejora'],
   periodos:    ['Periodos', 'Publicar y administrar periodos'],
+  visibilidad: ['Qué ve el equipo', 'Qué secciones y qué datos les aparecen'],
   ajustes:     ['Ajustes', 'Perfil, apariencia y notificaciones']
 };
 
@@ -41,7 +42,7 @@ async function iniciar() {
   const REQUIERE = { cargar: 'cargar', equipo: 'ver_equipo', destacados: 'ver_equipo',
                      progreso: 'ver_equipo', analisis: 'analisis_equipo', conclusiones: 'conclusiones',
                      notas: 'notas', personas: 'personas', invitados: 'personas',
-                     indicadores: 'indicadores', periodos: 'periodos' };
+                     indicadores: 'indicadores', periodos: 'periodos', visibilidad: 'personas' };
   Object.entries(REQUIERE).forEach(([vista, permiso]) => {
     if (!puede(YO, permiso)) { const b = $(`#nav button[data-v="${vista}"]`); if (b) b.remove(); }
   });
@@ -99,7 +100,7 @@ async function recargar() {
   PERIODOS = pe || []; METRICAS = me || []; USUARIOS = us || []; CATALOGO = (pm && pm.catalogo) || [];
   const opts = PERIODOS.filter((p) => !p.archivado)
     .map((p) => `<option value="${p.id}">${esc(p.etiqueta)}${p.publicado ? '' : ' (sin publicar)'}</option>`).join('');
-  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo', '#mtPeriodo'].forEach((s) => llenarSelect(s, opts));
+  ['#perSel', '#eqPeriodo', '#dsPeriodo', '#prPeriodo', '#anPeriodo', '#cnPeriodo', '#mtPeriodo', '#visPeriodo'].forEach((s) => llenarSelect(s, opts));
   // El equipo entero puede recibir una nota, también la supervisión. Menos yo misma.
   const opUsuarios = USUARIOS.filter((u) => u.activo && esColaborador(u) && u.id !== YO.id)
     .map((u) => `<option value="${u.id}">${esc(u.nombre)}${u.rol === 'supervisor' ? ' (supervisión)' : ''}</option>`).join('');
@@ -135,6 +136,8 @@ function contenidoDeLaVista(v) {
   if (v === 'conclusiones') cargarConclusiones();
   if (v === 'invitados') pintarInvitados();
   if (v === 'periodos') cargarMetasPeriodo();
+  if (v === 'indicadores') cargarPlus();
+  if (v === 'visibilidad') cargarVisibilidad();
   if (v === 'notas') cargarNotasAdmin();   // para ver al toque quién confirmó
 }
 $('#nav').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) ir(b.dataset.v); });
@@ -231,12 +234,58 @@ function avisoPeriodo() {
 /** Si el archivo trae el análisis escrito, avisamos que también se va a cargar. */
 function avisoExtras() {
   const e = ANALISIS && ANALISIS.extras;
-  if (!e || (!e.fortalezas && !e.conclusiones)) return '';
+  if (!e) return '';
   const partes = [];
-  if (e.fortalezas) partes.push(`<b>fortalezas y errores</b> de ${e.fortalezas} persona(s)`);
-  if (e.conclusiones) partes.push(`<b>${e.conclusiones} conclusiones</b> para Gerencia`);
-  return `<div class="aviso info">La planilla también trae ${partes.join(' y ')}.
-    Se cargan tal cual están escritas: las fortalezas le llegan a cada persona y las conclusiones quedan solo para quien tenga permiso.</div>`;
+  if (e.fortalezas) {
+    partes.push(`<b>fortalezas y errores</b> de ${e.fortalezas} persona(s), de su hoja dedicada`);
+  } else if (e.narrativa) {
+    partes.push(`lo que el <b>Dashboard</b> dice de ${e.narrativa} persona(s)
+      (${e.personasNarrativa.map(esc).join(', ')}) — este archivo no trae la hoja
+      <b>Fortalezas y Errores</b>, así que se lee del texto del propio Dashboard`);
+  }
+  if (e.conclusiones) partes.push(`<b>${e.conclusiones} conclusión(es)</b> para Gerencia, que se reemplazan por las de este archivo`);
+  if (e.hojas && e.hojas.length) {
+    partes.push(`la <b>hoja propia</b> de ${e.hojas.length} persona(s): ` +
+      e.hojas.map((h) => `${esc(h.hoja)} → ${h.usuarioId ? '<b>' + esc(h.persona) + '</b>' : '<i>sin reconocer</i>'}`).join(' · '));
+  }
+  if (!partes.length) {
+    return `<div class="aviso warn">Este archivo no trae texto de análisis.
+      A cada persona se le va a mostrar un resumen armado con sus propios puntajes por criterio,
+      y las conclusiones de Gerencia quedan como estaban.</div>`;
+  }
+  return `<div class="aviso info">La planilla también trae ${partes.join('; y ')}.
+    Se carga tal cual está escrito: a cada persona le llega lo suyo, y las conclusiones
+    quedan solo para quien tenga permiso. Lo de nadie se inventa: si de alguien el archivo
+    no dice nada, se le muestra el orden de sus propios puntajes por criterio.</div>`;
+}
+
+/* El desglose de calidad viene transpuesto (un criterio por fila, un agente por
+   columna). Como no entra en la tabla de arriba, se confirma por separado. */
+function bloqueCriterios() {
+  const c = ANALISIS && ANALISIS.criterios;
+  if (!c || !c.filas || !c.filas.length) return '';
+  const sinMapear = c.personas.filter((p) => !p.usuarioId);
+  return `<div class="card" id="cardCriterios">
+    <div class="flex">
+      <div><h3 style="margin:0">Calidad por criterio</h3>
+        <p class="sub" style="margin:3px 0 0">Encontré el desglose en la hoja <b>${esc(c.hoja)}</b>:
+          ${c.filas.length} criterios × ${c.personas.length} persona(s). Cada criterio entra como indicador
+          secundario y alimenta el <b>Detalle por criterio</b> del panel de cada una.</p></div>
+      <div class="sp"></div>
+      <label class="permiso" style="width:auto"><input type="checkbox" id="critUsar" ${c.usar ? 'checked' : ''}>
+        <span><b>Cargar también esto</b></span></label>
+    </div>
+    <div class="scroll" style="margin-top:14px"><table><thead><tr>
+      <th>Criterio</th>${c.personas.map((p) => `<th class="num">${esc(p.texto)}</th>`).join('')}
+    </tr></thead><tbody>
+      ${c.filas.map((f) => `<tr><td>${esc(f.nombre)}</td>
+        ${c.personas.map((p) => `<td class="num">${f.valores[p.texto] ?? '—'}</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>
+    ${sinMapear.length ? `<div class="aviso warn" style="margin-top:13px">
+      No reconocí a ${sinMapear.length} de estas columnas: <b>${sinMapear.map((p) => esc(p.texto)).join('</b>, <b>')}</b>.
+      Sus puntajes no se van a cargar. Si son del equipo, dalas de alta o agregales ese nombre de planilla y volvé a subir el archivo.
+    </div>` : ''}
+  </div>`;
 }
 
 /* ---------------- pantalla de revisión ---------------- */
@@ -272,7 +321,9 @@ function pintarRevision() {
     </tbody></table></div>
 
     <h3 style="margin-top:24px">Indicadores</h3>
-    <p class="sub">Destildá lo que no quieras cargar. La meta y la dirección quedan guardadas para los próximos periodos.</p>
+    <p class="sub">Destildá lo que no quieras cargar. <b>Principal</b> es lo que define el resultado y el plus:
+      si una columna no queda marcada, se carga igual pero no se evalúa ni aparece en la tabla del equipo.<br>
+      Si el indicador ya existe, la planilla no le cambia la meta ni la configuración: eso se toca en <b>Indicadores</b>.</p>
     <div class="scroll"><table><thead><tr>
       <th style="width:34px"></th><th>Columna del Excel</th><th>Se guarda como</th>
       <th>Mejor cuando es</th><th class="num">Meta</th><th>Unidad</th><th style="text-align:center">Principal</th><th class="num">Ejemplo</th>
@@ -290,12 +341,18 @@ function pintarRevision() {
         <td class="num" style="color:var(--muted)">${esc(c.ejemplo ?? '')}</td>
       </tr>`).join('')}
     </tbody></table></div>
+    <div id="avisoPrincipales" class="aviso warn oculto" style="margin-top:14px"></div>
 
-    <div class="flex" style="margin-top:22px">
+  </div>
+  ${bloqueCriterios()}
+  <div class="card">
+    <div class="flex">
       <button class="btn primary" id="btnImportar">Cargar datos al periodo</button>
       <span style="font-size:13.5px;color:var(--ink-2)">Se cargan en: <b>${esc((PERIODOS.find((p) => String(p.id) === $('#perSel').value) || {}).etiqueta || '—')}</b></span>
     </div>
   </div>`;
+
+  $('#critUsar')?.addEventListener('change', (e) => { ANALISIS.criterios.usar = e.target.checked; });
 
   const sh = $('#selHoja');
   if (sh) sh.addEventListener('change', (e) => { HOJA = ANALISIS.hojas.find((h) => h.hoja === e.target.value); pintarRevision(); });
@@ -336,8 +393,23 @@ function pintarRevision() {
     const k = e.target.dataset.k;
     const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     if (k === 'usar') c.usar = val; else c.config[k] = k === 'meta' ? (val === '' ? null : Number(val)) : val;
+    avisarPrincipales();
   }));
+  avisarPrincipales();
   $('#btnImportar').addEventListener('click', importar);
+}
+
+/** Avisa antes de importar si ninguna columna va a evaluarse. */
+function avisarPrincipales() {
+  const caja = $('#avisoPrincipales'); if (!caja || !HOJA) return;
+  const usadas = HOJA.columnas.filter((c) => c.numerica && c.usar);
+  const princ = usadas.filter((c) => c.config.principal);
+  if (!usadas.length || princ.length) { caja.classList.add('oculto'); return; }
+  caja.classList.remove('oculto');
+  caja.innerHTML = `<b>Ninguna columna está marcada como principal.</b> Los datos se van a cargar igual,
+    pero el periodo va a quedar sin resultado: no se evalúa a nadie y la tabla del equipo sale vacía.
+    Marcá como <b>principal</b> las columnas que definen el desempeño (chats, calidad, tiempo de respuesta)
+    y ponéles su meta.`;
 }
 
 async function importar() {
@@ -352,10 +424,11 @@ async function importar() {
         periodoId: Number($('#perSel').value),
         hoja: HOJA.hoja,
         columnas: HOJA.columnas.filter((c) => c.numerica).map((c) => ({ titulo: c.titulo, usar: c.usar, ...c.config })),
-        personas: HOJA.personasMapeadas
+        personas: HOJA.personasMapeadas,
+        criterios: (ANALISIS.criterios && ANALISIS.criterios.usar) ? ANALISIS.criterios : null
       }
     });
-    toast(`Listo: ${r.valores} valores de ${r.personas} personas`);
+    toast(`Listo: ${r.valores} valores de ${r.personas} personas${r.criterios ? ` · ${r.criterios} puntajes por criterio` : ''}${r.hojas ? ` · ${r.hojas} hoja(s) propia(s)` : ''}`);
     ANALISIS = null; HOJA = null;
     $('#file').value = '';   // permite volver a subir el mismo archivo
     $('#p3').innerHTML = `<div class="card"><div class="aviso ok" style="margin-bottom:14px">
@@ -405,6 +478,23 @@ async function cargarEquipo() {
     return x && x.valor !== null && x.valor !== undefined;
   });
   const principales = d.metricas.filter((m) => m.principal && conDatos(m));
+
+  /* Hay datos cargados pero ningún indicador principal que evaluar: el periodo queda
+     en blanco y, sin este aviso, no hay forma de saber por qué. Pasa cuando la planilla
+     trae columnas con nombres nuevos: entran como indicadores secundarios. */
+  const conValores = d.metricas.filter(conDatos);
+  const avisoVacio = (d.filas.length && !principales.length)
+    ? `<div class="aviso warn" style="margin-bottom:16px">
+         <b>Este periodo tiene datos cargados, pero no hay nada que evaluar.</b><br>
+         Se cargaron valores de ${d.filas.length} persona(s) en:
+         ${conValores.length ? '<b>' + conValores.map((m) => esc(m.nombre)).join('</b>, <b>') + '</b>' : '—'},
+         y ninguno de esos indicadores está marcado como <b>principal</b>, que es lo que define
+         el resultado y el plus.<br>
+         Entrá a <b>Indicadores</b>, marcá como principales los que correspondan y ponéles su meta.
+         Si son el mismo indicador de siempre con otro nombre, conviene renombrar la columna
+         al importar para que no se dupliquen.
+       </div>`
+    : '';
   try {
     const podio = await api('/api/destacados/' + id);
     $('#eqResumen').insertAdjacentHTML('beforebegin', '');
@@ -421,9 +511,9 @@ async function cargarEquipo() {
     $('#eqVerBtn').classList.toggle('oculto', !d.filas.length);
   }
 
-  $('#eqTabla').innerHTML = d.filas.length ? `<table><thead><tr>
+  $('#eqTabla').innerHTML = d.filas.length ? `${avisoVacio}<table><thead><tr>
       <th>Colaborador</th>${principales.map((m) => `<th class="num" title="${esc(m.nombre)}">${esc(tituloCorto(m.nombre))}</th>`).join('')}
-      <th class="num">Cumplidos</th><th>Resultado</th><th></th></tr></thead><tbody>
+      <th class="num">Cumplidos</th><th>Resultado</th><th class="num">Plus</th><th></th></tr></thead><tbody>
     ${d.filas.map((f) => `<tr>
       <td><div class="who">${avatarEstado({ ...f, ...(USUARIOS.find((u) => u.id === f.id) || {}) })}<div>
         <b>${esc(f.nombre)}</b><small>${esc(f.puesto || '')}</small></div></div></td>
@@ -440,6 +530,7 @@ async function cargarEquipo() {
       }).join('')}
       <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
+      <td class="num">${f.plus === null || f.plus === undefined ? '—' : (f.plus > 0 ? `<b>${gs(f.plus)}</b>` : 'sin plus')}</td>
       <td style="text-align:right"><a class="btn sm" href="/mi-panel?ver=${f.id}"
            title="Ver su panel tal como lo ve esa persona">👁 Ver panel</a></td>
     </tr>`).join('')}</tbody></table>`
@@ -750,7 +841,6 @@ $('#uCrear').addEventListener('click', async () => {
 });
 
 function pintarUsuarios() {
-  // Los invitados tienen su propia sección: acá va solo el equipo.
   const delEquipo = (u) => u.rol !== 'invitado';
   const activos = USUARIOS.filter((u) => u.activo && delEquipo(u));
   const bajas = USUARIOS.filter((u) => !u.activo && delEquipo(u));
@@ -765,8 +855,6 @@ function pintarUsuarios() {
           : u.rol === 'supervisor' ? `<span class="pill gris">Supervisor</span>
               <small style="display:block;color:var(--muted);margin-top:3px">${u.permisos.length} permiso(s)</small>`
           : u.rol === 'invitado' ? '<span class="pill gris">Invitado</span>' : 'Agente'}</td>
-      <td class="num">${u.registros}</td>
-      <td style="font-size:12.5px;color:var(--muted);max-width:210px">${(u.alias || []).map(esc).join(' · ') || '—'}</td>
       <td><div class="acciones">
         ${!puede(YO, 'personas') ? '' : `
         ${u.activo && u.rol !== 'gerente' && u.id !== YO.id
@@ -780,8 +868,7 @@ function pintarUsuarios() {
     </tr>`;
 
   $('#usTabla').innerHTML = `<table><thead><tr>
-      <th>Colaborador</th><th>Usuario</th><th>Puesto</th><th>Rol</th>
-      <th class="num">Datos</th><th>Nombres en la planilla</th><th></th></tr></thead>
+      <th>Colaborador</th><th>Usuario</th><th>Puesto</th><th>Rol</th><th></th></tr></thead>
     <tbody>${activos.map(fila).join('')}</tbody></table>
     ${bajas.length ? `<h3 style="margin:26px 0 4px">Ya no están en el equipo</h3>
       <p class="sub">Sus resultados siguen contando en los periodos donde participaron, y aparecen como
@@ -844,6 +931,46 @@ $('#iCrear').addEventListener('click', async () => {
 });
 
 /** Editor en línea, debajo de la fila de la persona. */
+/** El recuadro de "quién puede ver su hoja", dentro del editor de la persona. */
+async function pintarPermisoHoja(id, u) {
+  const caja = $('#edHoja'); if (!caja) return;
+  let d;
+  try { d = await api(`/api/hoja-autorizados/${id}`); } catch (e) { caja.remove(); return; }
+  const actual = $('#edHoja'); if (!actual) return;
+
+  const ids = d.autorizados.map((a) => a.usuario_id);
+  const candidatos = USUARIOS.filter((x) => esColaborador(x) && x.id !== id && !ids.includes(x.id));
+  actual.querySelector('.cargando-hoja')?.remove();
+  actual.querySelector('.hoja-permiso')?.remove();
+  actual.insertAdjacentHTML('beforeend', `<div class="hoja-permiso">
+    ${d.hojas ? '' : `<p class="sub" style="margin:0 0 10px"><b>Todavía no tiene ninguna hoja cargada.</b>
+      Aparece cuando la planilla del mes traiga una hoja dedicada a ella. Los permisos se pueden dejar listos desde ya.</p>`}
+    <div class="alias-lista">${d.autorizados.length
+      ? d.autorizados.map((a) => `<span class="alias-chip">${esc(a.nombre)}${a.puesto ? ' · ' + esc(a.puesto) : ''}
+          <button type="button" data-quitarhoja="${a.usuario_id}" title="Quitar el permiso">×</button></span>`).join('')
+      : '<span class="sub">Solo ella y la gerencia.</span>'}</div>
+    <div class="flex" style="gap:10px;margin-top:12px;flex-wrap:wrap">
+      <select id="edHojaSel" style="max-width:280px">${candidatos.length
+        ? candidatos.map((x) => `<option value="${x.id}">${esc(x.nombre)}${x.puesto ? ' — ' + esc(x.puesto) : ''}</option>`).join('')
+        : '<option value="">No queda nadie por agregar</option>'}</select>
+      <button type="button" class="btn sm" id="edHojaDar">Dar permiso</button>
+    </div></div>`);
+
+  const guardar = async (lista) => {
+    try {
+      await api(`/api/hoja-autorizados/${id}`, { method: 'PUT', body: { usuarios: lista } });
+      toast('Permisos de su hoja actualizados');
+      pintarPermisoHoja(id, u);
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#edHojaDar')?.addEventListener('click', () => {
+    const nuevo = Number($('#edHojaSel') && $('#edHojaSel').value);
+    if (nuevo) guardar([...ids, nuevo]);
+  });
+  $$('#edHoja [data-quitarhoja]').forEach((b) => b.addEventListener('click', () =>
+    guardar(ids.filter((x) => x !== Number(b.dataset.quitarhoja)))));
+}
+
 function abrirEditor(id) {
   const u = USUARIOS.find((x) => x.id === id);
   const fila = $(`tr[data-fila="${id}"]`);
@@ -852,7 +979,7 @@ function abrirEditor(id) {
   $$('tr.editor').forEach((t) => t.remove());
   const tr = document.createElement('tr');
   tr.className = 'editor';
-  tr.innerHTML = `<td colspan="7">
+  tr.innerHTML = `<td colspan="5">
     <div id="edErr" class="aviso err oculto"></div>
     <div class="row">
       <div><label class="f">Nombre completo</label><input id="edNombre" value="${esc(u.nombre)}"></div>
@@ -870,6 +997,17 @@ function abrirEditor(id) {
       <div><label class="f">Nueva contraseña</label><input id="edClave" placeholder="dejar vacío para no cambiarla"></div>
       <div><label class="f">Agregar nombre de planilla</label><input id="edAlias" placeholder="Ej: Alma E."></div>
     </div>
+    ${(u.alias || []).length ? `
+      <div style="margin-top:18px" id="edAliasCaja">
+        <label class="f">Nombres con los que aparece en la planilla (${u.alias.length})</label>
+        <p class="sub" style="margin:0 0 10px">Se aprenden solos en cada carga. Si una planilla trae una fila por chat,
+          se llenan de números: ahí conviene limpiarlos.</p>
+        <div class="alias-lista">${u.alias.map((a) => `<span class="alias-chip ${/\d/.test(a) ? 'sucio' : ''}">
+          ${esc(a)}<button type="button" data-quitaralias="${esc(a)}" title="Quitar este nombre">×</button></span>`).join('')}</div>
+        ${u.alias.some((a) => /\d/.test(a))
+          ? `<button class="btn sm danger" id="edLimpiarAlias" style="margin-top:11px">Quitar los
+               ${u.alias.filter((a) => /\d/.test(a)).length} que tienen números</button>` : ''}
+      </div>` : ''}
     ${YO.rol === 'gerente' && u.rol !== 'gerente' && u.rol !== 'agente' ? `
       <div style="margin-top:20px">
         <label class="f">Permisos de ${esc(u.nombre)}</label>
@@ -889,6 +1027,15 @@ function abrirEditor(id) {
         <p class="sub" style="margin:0 0 11px">Solo si a esta persona se le exige un número distinto al del resto.
           Vacío = se le aplica la meta del periodo. Lo que pongas acá manda sobre todo lo demás.</p>
         <div class="cargando-metas sub">Cargando sus metas…</div>
+      </div>` : ''}
+
+    ${puede(YO, 'personas') && u.rol !== 'invitado' ? `
+      <div style="margin-top:20px" id="edHoja">
+        <label class="f">Quién puede ver la hoja propia de ${esc(u.nombre)}</label>
+        <p class="sub" style="margin:0 0 11px">Su hoja del periodo —la que la planilla le dedica, con sus
+          indicadores del cargo y su plus— la ven ella y la gerencia. Acá se agrega a quien más deba leerla.
+          ${esc(String(u.nombre).split(' ')[0])} también puede darlo desde su propio panel.</p>
+        <div class="cargando-hoja sub">Cargando…</div>
       </div>` : ''}
 
     <div class="barra-guardar" style="margin:18px 0 0;border-radius:var(--radius-sm)">
@@ -939,6 +1086,29 @@ function abrirEditor(id) {
       escucharCambios(caja);
     }).catch(() => { $('#edMetas')?.remove(); });
   }
+
+  /* Quién puede leer su hoja. Se aplica al momento, igual que los nombres de
+     planilla: es un permiso, no un campo de la ficha. */
+  if ($('#edHoja')) pintarPermisoHoja(id, u);
+
+  // Quitar nombres de planilla. Se aplica al momento: no pasa por "Guardar cambios",
+  // porque es una limpieza, no una edición de la ficha.
+  const refrescarEditor = async () => { await recargar(); abrirEditor(id); };
+  $$('[data-quitaralias]', tr).forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r = await api(`/api/usuarios/${id}/alias?alias=${encodeURIComponent(b.dataset.quitaralias)}`, { method: 'DELETE' });
+      toast(r.borrados ? 'Nombre quitado' : 'Ese nombre ya no estaba');
+      refrescarEditor();
+    } catch (e) { toast(e.message, true); }
+  }));
+  $('#edLimpiarAlias')?.addEventListener('click', async () => {
+    if (!confirm(`Se van a quitar todos los nombres de planilla de ${u.nombre} que tengan números.\n\nNo se borra ningún dato cargado: solo deja de reconocerlos como si fueran ella.\n\n¿Continuar?`)) return;
+    try {
+      const r = await api(`/api/usuarios/${id}/alias?modo=con-numeros`, { method: 'DELETE' });
+      toast(`✓ Se quitaron ${r.borrados} nombre(s)`);
+      refrescarEditor();
+    } catch (e) { toast(e.message, true); }
+  });
 
   $('#edCerrar').addEventListener('click', () => {
     const hayCambios = !$('#edPendiente')?.classList.contains('oculto');
@@ -1033,14 +1203,12 @@ const accionesDeFila = async (e) => {
 $('#usTabla').addEventListener('click', accionesDeFila);
 $('#invTabla').addEventListener('click', accionesDeFila);
 
-/* ---------------- indicadores ---------------- */
-function pintarMetricas() {
-  $('#mtTabla').innerHTML = `<table><thead><tr>
-    <th>Indicador</th><th>Mejor cuando es</th><th class="num">Meta</th><th>Unidad</th>
-    <th style="text-align:center">Principal</th>
-    <th style="text-align:center" title="La supervisión no se evalúa con este indicador">No aplica a<br>supervisión</th>
-    <th>Consejo para el agente</th><th></th></tr></thead><tbody>
-    ${METRICAS.map((m) => `<tr>
+/* ---------------- indicadores ----------------
+   Los 3 principales son los que definen el resultado y el plus. El resto
+   —el desglose de calidad y lo que venga suelto en la planilla— va aparte,
+   plegado, para que esta pantalla no se vuelva una lista interminable. */
+function filaMetrica(m) {
+  return `<tr>
       <td><input data-m="${m.id}" data-k="nombre" value="${esc(m.nombre)}" style="min-width:190px"></td>
       <td><select data-m="${m.id}" data-k="direccion">
         <option value="mayor"${m.direccion === 'mayor' ? ' selected' : ''}>Mayor</option>
@@ -1051,7 +1219,138 @@ function pintarMetricas() {
       <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-k="exime_supervision" ${m.exime_supervision ? 'checked' : ''} style="width:17px;height:17px"></td>
       <td><input data-m="${m.id}" data-k="consejo" value="${esc(m.consejo || '')}" placeholder="Qué hacer para mejorarlo" style="min-width:260px"></td>
       <td style="text-align:right"><button class="btn sm danger" data-delm="${m.id}">Quitar</button></td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`;
+}
+
+const CABECERA_MET = `<thead><tr>
+    <th>Indicador</th><th>Mejor cuando es</th><th class="num">Meta</th><th>Unidad</th>
+    <th style="text-align:center">Principal</th>
+    <th style="text-align:center" title="La supervisión no se evalúa con este indicador">No aplica a<br>supervisión</th>
+    <th>Consejo para el agente</th><th></th></tr></thead>`;
+
+function pintarMetricas() {
+  const principales = METRICAS.filter((m) => m.principal);
+  const resto = METRICAS.filter((m) => !m.principal);
+  $('#mtTabla').innerHTML = `
+    <h3 style="margin:0 0 4px">Indicadores principales${principales.length ? ` (${principales.length})` : ''}</h3>
+    <p class="sub" style="margin:0 0 12px">Son los que definen el resultado del periodo y el plus.
+      Lo esperable son tres: chats respondidos, calidad y tiempo de respuesta.</p>
+    ${principales.length
+      ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${principales.map(filaMetrica).join('')}</tbody></table></div>`
+      : '<div class="vacio">Todavía no hay ninguno marcado como principal.</div>'}
+    ${resto.length ? `
+      <details style="margin-top:22px" ${resto.length <= 4 ? 'open' : ''}>
+        <summary style="cursor:pointer;font-size:14.5px;font-weight:650;color:var(--primary)">
+          Desglose y extras (${resto.length})</summary>
+        <p class="sub" style="margin:8px 0 12px">Los criterios de calidad y lo demás que trae la planilla.
+          Se guardan y se le muestran a cada persona en <b>Detalle por criterio</b>, pero no suman al plus.</p>
+        <div class="scroll"><table>${CABECERA_MET}<tbody>${resto.map(filaMetrica).join('')}</tbody></table></div>
+      </details>` : ''}`;
+}
+
+/* ---------------- qué ve el equipo ---------------- */
+let VIS = null;
+
+async function cargarVisibilidad() {
+  const caja = $('#visCaja'); if (!caja) return;
+  try { VIS = await api('/api/visibilidad'); } catch (e) { caja.innerHTML = ''; return; }
+  const soloLectura = !puedeEditar(YO);
+  caja.innerHTML = `<div class="permisos">${VIS.secciones.map(([k, t]) => `
+      <label class="permiso"><input type="checkbox" data-sec="${k}" ${VIS.ocultas.includes(k) ? '' : 'checked'} ${soloLectura ? 'disabled' : ''}>
+        <span><b>${esc(t)}</b><small>${VIS.ocultas.includes(k) ? 'oculto para el equipo' : 'lo ven'}</small></span></label>`).join('')}
+    </div>
+    ${soloLectura ? '' : `<div class="barra-guardar">
+      <span class="sub" id="visEstado" style="margin:0">Todo guardado.</span>
+      <div class="sp"></div>
+      <button class="btn primary" id="visGuardar" disabled>Guardar</button>
+    </div>`}`;
+  $$('#visCaja [data-sec]').forEach((el) => el.addEventListener('change', () => {
+    $('#visGuardar').disabled = false;
+    $('#visEstado').textContent = 'Hay cambios sin guardar';
+    $('#visEstado').className = 'pendiente';
+  }));
+  $('#visGuardar')?.addEventListener('click', async () => {
+    const ocultas = $$('#visCaja [data-sec]').filter((c) => !c.checked).map((c) => c.dataset.sec);
+    try {
+      await api('/api/visibilidad', { method: 'PUT', body: { ocultas } });
+      toast(ocultas.length ? `✓ Guardado: ${ocultas.length} sección(es) oculta(s)` : '✓ Guardado: el equipo ve todo');
+      cargarVisibilidad();
+    } catch (e) { toast(e.message, true); }
+  });
+  pintarVisPeriodo();
+}
+
+function pintarVisPeriodo() {
+  const caja = $('#visPerCaja'); if (!caja || !VIS) return;
+  const id = $('#visPeriodo')?.value;
+  const per = PERIODOS.find((x) => String(x.id) === String(id));
+  if (!per) { caja.innerHTML = '<div class="vacio">Todavía no hay periodos.</div>'; return; }
+  const ocultas = Array.isArray(per.ocultas) ? per.ocultas : [];
+  caja.innerHTML = `<label class="permiso" style="max-width:520px">
+      <input type="checkbox" id="visPerAnalisis" ${ocultas.includes('analisis') ? 'checked' : ''}>
+      <span><b>Ocultar las fortalezas y errores de ${esc(per.etiqueta)}</b>
+        <small>El equipo ve los números del periodo, pero no el análisis escrito.</small></span></label>`;
+  $('#visPerAnalisis').addEventListener('change', async (e) => {
+    const lista = e.target.checked ? ['analisis'] : [];
+    try {
+      await api(`/api/periodos/${per.id}/ocultas`, { method: 'PUT', body: { ocultas: lista } });
+      per.ocultas = lista;
+      toast(e.target.checked ? 'Oculto para el equipo' : 'Visible para el equipo');
+    } catch (err) { toast(err.message, true); e.target.checked = !e.target.checked; }
+  });
+}
+const visSel = $('#visPeriodo'); if (visSel) visSel.addEventListener('change', pintarVisPeriodo);
+
+/* Monto del plus por rol y por nivel. */
+let PLUS = null;
+
+async function cargarPlus() {
+  const caja = $('#plusCaja'); if (!caja) return;
+  try { PLUS = await api('/api/plus'); } catch (e) { caja.innerHTML = ''; return; }
+  const soloLectura = !puedeEditar(YO) || !puede(YO, 'indicadores');
+  const niveles = [['EXCELENTE', 'cumplió los 3'], ['BUENO', 'cumplió 2 de 3'],
+                   ['MALO', 'cumplió 1 de 3'], ['CRÍTICO', 'no cumplió ninguno']];
+  const campo = (rol, clave) => soloLectura
+    ? `<b>${gs(PLUS[rol][clave] || 0)}</b>`
+    : `<input type="number" step="1000" min="0" data-plus="${rol}" data-niv="${clave}"
+         value="${PLUS[rol][clave] ?? 0}" style="width:130px;text-align:right">`;
+  caja.innerHTML = `<div class="scroll"><table><thead><tr>
+      <th>Resultado del periodo</th><th class="num">Asesores</th><th class="num">Supervisión</th>
+    </tr></thead><tbody>
+    ${niveles.map(([clave, cuando]) => `<tr>
+      <td><span class="pill ${(ESCALA_COLOR[clave] || 'gris')}">${clave}</span>
+        <small style="display:block;color:var(--muted);margin-top:3px">${cuando}</small></td>
+      <td class="num">${campo('agente', clave)}</td>
+      <td class="num">${campo('supervisor', clave)}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+    ${soloLectura ? '' : `<div class="barra-guardar">
+      <span class="sub" id="plusEstado" style="margin:0">Todo guardado.</span>
+      <div class="sp"></div>
+      <button class="btn primary" id="plusGuardar" disabled>Guardar montos</button>
+    </div>`}`;
+  activarPlus();
+}
+
+const ESCALA_COLOR = { EXCELENTE: 'good', BUENO: 'warning', MALO: 'serious', 'CRÍTICO': 'critical' };
+
+function activarPlus() {
+  $$('#plusCaja [data-plus]').forEach((el) => el.addEventListener('input', () => {
+    $('#plusGuardar').disabled = false;
+    $('#plusEstado').textContent = 'Hay cambios sin guardar';
+    $('#plusEstado').className = 'pendiente';
+  }));
+  $('#plusGuardar')?.addEventListener('click', async () => {
+    const cuerpo = { agente: {}, supervisor: {} };
+    $$('#plusCaja [data-plus]').forEach((el) => { cuerpo[el.dataset.plus][el.dataset.niv] = Number(el.value || 0); });
+    const btn = $('#plusGuardar'); btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      PLUS = await api('/api/plus', { method: 'PUT', body: cuerpo });
+      toast('✓ Montos del plus guardados');
+      cargarPlus();
+      if (VISTA === 'equipo') cargarEquipo();
+    } catch (e) { btn.disabled = false; btn.textContent = 'Guardar montos'; toast(e.message, true); }
+  });
 }
 
 $('#mtTabla').addEventListener('change', async (e) => {

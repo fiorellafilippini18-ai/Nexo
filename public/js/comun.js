@@ -171,11 +171,28 @@ const tituloCortoMet = (n) => String(n || '')
    se muestra tal cual. Lo que cambia es el encabezado, que le
    habla directamente a la persona cuando es su propia ficha.
    ========================================================= */
+/* De dónde salió el análisis. Importa decirlo: no es lo mismo una frase que
+   escribió la supervisión que una que el sistema sacó de ordenar puntajes. */
+const FUENTE_ANALISIS = {
+  hoja:      'Lo escribió tu supervisión en la hoja <b>Fortalezas y Errores</b> de la planilla.',
+  dashboard: 'Tomado de lo que el <b>Dashboard</b> del mes dice de vos, tal como está escrito ahí.',
+  criterios: 'El archivo de este mes no trae texto sobre vos, así que esto sale de ordenar <b>tus propios puntajes por criterio</b>.'
+};
+
+/** Un texto con varias frases (una por renglón) se ve mejor como lista. */
+function listaDeTexto(txt, vacio) {
+  const partes = String(txt || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!partes.length) return `<p>${vacio}</p>`;
+  if (partes.length === 1) return `<p>${esc(partes[0])}</p>`;
+  return `<ul class="an-lista">${partes.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`;
+}
+
 function analisisHTML(d) {
   if (!d || !d.filas || !d.filas.length) {
     return `<div class="card"><h2>Fortalezas y errores</h2>
       <div class="vacio">Todavía no hay análisis cargado para este periodo.<br>
-        Se completa solo cuando la planilla trae la hoja <b>Fortalezas y Errores</b>.</div></div>`;
+        Se completa al cargar la planilla del mes: de la hoja <b>Fortalezas y Errores</b>
+        si la trae, y si no, de lo que el <b>Dashboard</b> dice de cada persona.</div></div>`;
   }
 
   /* --- ficha personal: la propia, hablándole de vos --- */
@@ -183,15 +200,15 @@ function analisisHTML(d) {
     const primer = esc(String(f.nombre).split(' ')[0]);
     return `<div class="card">
       <h2>${primer}, así venís en ${esc(d.periodo.etiqueta)}</h2>
-      <p class="sub">Escrito por tu supervisión a partir de los números del periodo.</p>
+      <p class="sub">${FUENTE_ANALISIS[f.fuente] || FUENTE_ANALISIS.hoja}</p>
       <div class="analisis">
         <div class="lado bien">
           <div class="t">✓ Lo que estás haciendo bien</div>
-          <p>${f.fortalezas ? esc(f.fortalezas) : 'Sin observaciones cargadas para este periodo.'}</p>
+          ${listaDeTexto(f.fortalezas, 'Sin observaciones cargadas para este periodo.')}
         </div>
         <div class="lado corregir">
           <div class="t">↗ ${primer}, esto es lo que tenés que corregir</div>
-          <p>${f.errores ? esc(f.errores) : 'Sin puntos a corregir para este periodo. Muy bien.'}</p>
+          ${listaDeTexto(f.errores, 'Sin puntos a corregir para este periodo. Muy bien.')}
         </div>
       </div>
     </div>`;
@@ -204,8 +221,8 @@ function analisisHTML(d) {
       <td><div class="who">${avatarHTML(f)}<div>
         <b>${esc(f.nombre)}</b>${f.esMio ? '<span class="pill lima" style="margin-left:7px">sos vos</span>' : ''}
         <small>${esc(f.puesto || '')}</small></div></div></td>
-      <td class="celda-bien">${f.fortalezas ? esc(f.fortalezas) : '—'}</td>
-      <td class="celda-corregir">${f.errores ? esc(f.errores) : '—'}</td>
+      <td class="celda-bien">${listaDeTexto(f.fortalezas, '—')}</td>
+      <td class="celda-corregir">${listaDeTexto(f.errores, '—')}</td>
     </tr>`;
 
   const mia = d.filas.find((f) => f.esMio);
@@ -221,6 +238,10 @@ function analisisHTML(d) {
 
 /** ¿Esta persona puede hacer tal cosa? La gerencia siempre puede. */
 const puede = (yo, clave) => !!yo && (yo.rol === 'gerente' || (yo.permisos || []).includes(clave));
+
+/** Guaraníes, como se escriben acá: Gs. 600.000 */
+const gs = (n) => (n === null || n === undefined)
+  ? '' : 'Gs. ' + Number(n).toLocaleString('es-PY', { maximumFractionDigits: 0 });
 
 /** Quién firma una nota: su nombre y su puesto. Si no cargó un puesto, se usa el rol. */
 const ROLES = { gerente: 'Gerencia', supervisor: 'Supervisión', agente: 'Agente', invitado: 'Invitado' };
@@ -694,4 +715,126 @@ function montarMenuUsuario(pie, { alAjustes }) {
       location.href = '/';
     });
   });
+}
+
+/* =========================================================
+   Hoja propia del periodo.
+
+   La planilla de la supervisión le dedica una hoja a algunas
+   personas, y el formato cambia mes a mes: un mes son 7
+   secciones, otro 4, y las tablas nunca están en la misma fila.
+   Así que no se dibuja un formato fijo: se muestra lo que el
+   lector encontró —títulos, párrafos y tablas— en el mismo
+   orden en que viene en el archivo.
+   ========================================================= */
+
+/** Un párrafo puede venir partido en varios renglones del Excel: se rearma. */
+function parrafosDe(lineas) {
+  const out = [];
+  for (const linea0 of (lineas || [])) {
+    const linea = String(linea0 || '').trim();
+    if (!linea) continue;
+    /* Arranca un párrafo nuevo con cada viñeta y con cada etiqueta en
+       mayúsculas ("RESULTADO:", "PLUS DEL MES:"): si no, una conclusión
+       importante queda pegada al renglón de arriba. */
+    const corta = /^[•·➖✅❌⚠️🚨]/.test(linea) || /^[A-ZÁÉÍÓÚÑ0-9 ]{3,28}:/.test(linea);
+    if (corta || !out.length) out.push(linea);
+    else out[out.length - 1] += ' ' + linea;
+  }
+  return out;
+}
+
+/** Los párrafos que marcan lado se pintan con color; el resto, en gris. */
+const claseParrafo = (p) => /^✅/.test(p) ? 'hp-si'
+  : /^[❌⚠️🚨]/.test(p) ? 'hp-no'
+  : /^➖/.test(p) ? 'hp-neutro' : '';
+
+function bloqueHTML(b) {
+  if (!b) return '';
+  if (b.tipo === 'titulo') return `<h3 class="hp-titulo">${esc(b.texto)}</h3>`;
+
+  if (b.tipo === 'texto') {
+    return parrafosDe(b.lineas).map((p) =>
+      `<p class="hp-p ${claseParrafo(p)}">${esc(p)}</p>`).join('');
+  }
+
+  if (b.tipo === 'tabla') {
+    const ancho = Math.max((b.cabecera || []).length, ...(b.filas || []).map((f) => (f.celdas || []).length), 1);
+    /* Solo se alinean a la derecha las columnas que de verdad traen números.
+       Si no, un comentario largo queda pegado al borde y no se lee. */
+    const num = [];
+    for (let c = 0; c < ancho; c++) {
+      const vals = (b.filas || []).map((f) => (f.celdas || [])[c]).filter((x) => x);
+      num[c] = c > 0 && vals.length > 0
+        && vals.filter((v) => esNumeroSuelto(v)).length >= Math.ceil(vals.length * 0.6);
+    }
+    const cl = (c) => (num[c] ? ' class="num"' : '');
+
+    const filas = (b.filas || []).map((f) => {
+      const celdas = (f.celdas || []).map((c, i) => `<td${cl(i)}>${esc(numeroLocal(c))}</td>`).join('');
+      const detalle = f.detalle
+        ? `<tr class="hp-detalle"><td colspan="${ancho}">${esc(f.detalle)}</td></tr>` : '';
+      return `<tr>${celdas}</tr>${detalle}`;
+    }).join('');
+    const cab = (b.cabecera || []).some((c) => c)
+      ? `<thead><tr>${b.cabecera.map((c, i) => `<th${cl(i)}>${esc(c)}</th>`).join('')}</tr></thead>`
+      : '';
+    return `<div class="scroll"><table class="hp-tabla">${cab}<tbody>${filas}</tbody></table></div>`;
+  }
+  return '';
+}
+
+/** ¿La celda es solo un número? ("7.8" sí; "2,6 min" no; "≥ 800" no) */
+const esNumeroSuelto = (v) => /^-?\d{1,3}(\.\d{3})*([.,]\d+)?%?$/.test(String(v).trim());
+
+/** Los decimales se escriben con coma, como en el resto de la plataforma. */
+const numeroLocal = (v) => {
+  const t = String(v ?? '').trim();
+  return /^-?\d+\.\d+%?$/.test(t) ? t.replace('.', ',') : t;
+};
+
+/**
+ * La hoja completa. `d` es lo que devuelve /api/hoja/:periodoId.
+ * `quien` es de quién es el panel, para hablarle en segunda persona o no.
+ */
+function hojaHTML(d, propia) {
+  if (!d) return '';
+  if (d.oculto) {
+    return `<div class="card"><h2>Mi hoja del periodo</h2>
+      <div class="vacio">Esta sección todavía no está publicada.<br>
+        Tu supervisión te va a avisar cuando esté disponible.</div></div>`;
+  }
+  if (!d.hoja) {
+    return `<div class="card"><h2>${propia ? 'Mi hoja del periodo' : 'Hoja del periodo'}</h2>
+      <div class="vacio">No hay una hoja propia en <b>${esc(d.periodo.etiqueta)}</b>.<br>
+        Aparece cuando la planilla del mes trae una hoja dedicada a esta persona.</div></div>`;
+  }
+
+  const h = d.hoja;
+  const cuerpo = (h.bloques || []).map(bloqueHTML).join('');
+  return `<div class="card hoja-propia">
+      <h2>${esc(h.titulo || 'Hoja del periodo')}</h2>
+      <p class="sub">${esc(h.nombre)}${h.puesto ? ' · ' + esc(h.puesto) : ''} — ${esc(d.periodo.etiqueta)}.
+        Es la hoja <b>${esc(h.hoja)}</b> de la planilla del mes, tal como la cargó la supervisión.</p>
+      ${cuerpo || '<div class="vacio">La hoja vino vacía.</div>'}
+    </div>
+    ${d.puedeDar && propia ? permisosHojaHTML(d) : ''}`;
+}
+
+/** El recuadro para decidir quién más puede ver la hoja. */
+function permisosHojaHTML(d) {
+  const lista = d.autorizados || [];
+  return `<div class="card" id="cardHojaPermisos">
+    <h3>Quién más puede ver esta hoja</h3>
+    <p class="sub">Siempre la ven ${d.esMia ? 'vos' : 'esa persona'} y la gerencia.
+      Acá se agrega a quien ${d.esMia ? 'quieras' : 'corresponda'} dejar que la lea.</p>
+    <div id="hojaChips" class="chips">${lista.length
+      ? lista.map((a) => `<span class="chip">${esc(a.nombre)}
+          <button class="x" data-quitar="${a.usuario_id}" title="Quitar">×</button></span>`).join('')
+      : '<span class="sub">Nadie más por ahora.</span>'}</div>
+    <div class="flex" style="gap:10px;margin-top:12px;flex-wrap:wrap">
+      <select id="hojaAgregar" style="max-width:280px"></select>
+      <button class="btn sm" id="btnHojaAgregar">Dar permiso</button>
+    </div>
+  </div>`;
 }

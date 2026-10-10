@@ -210,3 +210,53 @@ CREATE TABLE IF NOT EXISTS metas_persona (
   meta       NUMERIC NOT NULL,
   PRIMARY KEY (usuario_id, metrica_id)
 );
+
+/* Monto del plus en guaraníes, por rol y por nivel.
+   Asesores: 3 de 3 → 600.000 · 2 de 3 → 300.000 (50%) · 1 de 3 → 0 · ninguno → crítico.
+   Supervisión: su propia escala, 800.000 y 400.000.
+   Se edita desde Indicadores → Monto del plus; esto es solo el valor inicial. */
+INSERT INTO config (clave, valor) VALUES ('plus_montos',
+  '{"agente":{"EXCELENTE":600000,"BUENO":300000,"MALO":0,"CRÍTICO":0},
+    "supervisor":{"EXCELENTE":800000,"BUENO":400000,"MALO":0,"CRÍTICO":0}}')
+ON CONFLICT (clave) DO NOTHING;
+
+/* Qué secciones ve el equipo. Gerencia ve siempre todo; esta lista son las
+   secciones que quedan ocultas para el resto. */
+INSERT INTO config (clave, valor) VALUES ('secciones_ocultas', '[]')
+  ON CONFLICT (clave) DO NOTHING;
+
+/* Y además, por periodo: a veces hay que publicar los números pero no todavía
+   las fortalezas y errores de ese mes. */
+ALTER TABLE periodos ADD COLUMN IF NOT EXISTS ocultas JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+/* De dónde salió el análisis de cada persona: de una hoja dedicada
+   ("Fortalezas y Errores"), del texto del propio Dashboard, o de ordenar
+   sus puntajes por criterio. En pantalla se aclara, así nadie confunde
+   lo que escribió la supervisión con lo que calculó el sistema. */
+ALTER TABLE analisis ADD COLUMN IF NOT EXISTS fuente TEXT NOT NULL DEFAULT 'hoja';
+
+/* Hoja propia de una persona.
+   La planilla de la supervisión trae una hoja por persona ("Revisión Lucia
+   Velázquez") con sus indicadores del cargo, qué cumple y qué no, y qué hacer
+   el mes que viene. El formato cambia mes a mes, así que no se guarda en
+   columnas: se guarda el contenido leído por bloques —títulos, párrafos y
+   tablas— y la pantalla lo muestra tal como viene. */
+CREATE TABLE IF NOT EXISTS hojas_persona (
+  id         SERIAL PRIMARY KEY,
+  periodo_id INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  hoja       TEXT NOT NULL DEFAULT '',
+  titulo     TEXT NOT NULL DEFAULT '',
+  bloques    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  UNIQUE (periodo_id, usuario_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hojas_periodo ON hojas_persona(periodo_id);
+
+/* Quién más puede ver la hoja de alguien.
+   Por defecto la ve esa persona y la gerencia. Acá se anotan los permisos
+   que el dueño de la hoja (o Gerencia) decide dar a alguien más. */
+CREATE TABLE IF NOT EXISTS hoja_autorizados (
+  dueno_id   INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  PRIMARY KEY (dueno_id, usuario_id)
+);

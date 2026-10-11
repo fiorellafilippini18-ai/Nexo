@@ -97,6 +97,11 @@ const muestraDe = (p) => (PALETAS.find(([v]) => v === p) || PALETAS[0]).slice(2)
    el servidor ya decide cuántas filas manda según los permisos.
    ========================================================= */
 function progresoHTML(d) {
+  if (d && d.oculto) {
+    return `<div class="card"><h2>Progreso del mes</h2>
+      <div class="vacio">Esta sección está oculta para el equipo.<br>
+        Se vuelve a mostrar desde <b>Qué ve el equipo</b>.</div></div>`;
+  }
   if (!d || !d.filas || !d.filas.length) {
     return `<div class="card"><h2>Progreso por agente</h2>
       <div class="vacio">Todavía no hay datos cargados en este periodo.</div></div>`;

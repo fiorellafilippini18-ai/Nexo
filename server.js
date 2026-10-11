@@ -244,6 +244,36 @@ async function seccionesOcultas() {
 /** ¿Esta persona puede ver esta sección? La gestión no se ve afectada. */
 const ve = (req, ocultas, clave) => req.permisos.includes('ver_equipo') || !ocultas.includes(clave);
 
+/**
+ * Con los ojos de quién se está mirando esta pantalla.
+ *
+ * Hace falta para "ver el panel de": ahí la gerencia abre la pantalla de otra
+ * persona, y si se aplicaran sus propios permisos vería todo. La pantalla
+ * promete mostrar lo que ve esa persona, así que tiene que cumplirlo: si no,
+ * no hay forma de comprobar qué le ocultaste al equipo.
+ *
+ * Devuelve { uid, gestion, ocultas, propio }.
+ */
+async function comoQuien(req) {
+  const mio = async () => {
+    const gestion = req.permisos.includes('ver_equipo');
+    return { uid: req.uid, gestion, ocultas: gestion ? [] : await seccionesOcultas(), propio: true };
+  };
+  const pedido = req.permisos.includes('ver_equipo') && req.query.usuarioId
+    ? Number(req.query.usuarioId) : null;
+  if (!pedido || pedido === req.uid) return mio();
+
+  const u = await one('SELECT id, rol, permisos FROM usuarios WHERE id=$1', [pedido]);
+  if (!u) return mio();
+  const gestion = permisosDe(u).includes('ver_equipo');
+  return { uid: u.id, gestion, ocultas: gestion ? [] : await seccionesOcultas(), propio: false };
+}
+
+/** ¿Esta pantalla muestra la sección, con los ojos de quien la está mirando? */
+const veSeccion = (quien, per, clave) =>
+  quien.gestion || !(quien.ocultas.includes(clave)
+    || (Array.isArray(per && per.ocultas) ? per.ocultas : []).includes(clave));
+
 app.get('/api/visibilidad', pedirLogin, async (req, res) => {
   res.json({ secciones: SECCIONES, ocultas: await seccionesOcultas() });
 });
@@ -1190,16 +1220,20 @@ app.get('/api/mi-desempeno/:periodoId', pedirLogin, async (req, res) => {
   const comentario = await one('SELECT texto FROM comentarios WHERE periodo_id=$1 AND usuario_id=$2', [per.id, objetivo]);
   const persona = await one('SELECT nombre, puesto, avatar, rol FROM usuarios WHERE id=$1', [objetivo]);
 
-  // El monto del plus: cada quien ve el suyo, y la gestión ve el de todos.
-  // Si Gerencia lo ocultó, no se manda al navegador siquiera.
+  /* El monto del plus: cada quien ve el suyo, y la gestión ve el de todos.
+     Si Gerencia lo ocultó, no se manda al navegador siquiera. Mirando el
+     panel de otra persona valen las secciones que ve ELLA, no las mías. */
   const montos = await montosPlus();
-  const ocultasG = await seccionesOcultas();
-  const plus = ve(req, ocultasG, 'plus')
+  const ojos = await comoQuien(req);
+  const plus = veSeccion(ojos, per, 'plus')
     ? plusDe(montos, persona ? persona.rol : 'agente', evalu.nivel) : null;
 
   res.json({
     periodo: per, persona, escala: ESCALA, ...evalu,
     posicion, deCuantos: todos.length, plus,
+    // Lo que esta persona no ve: así la pantalla saca esas entradas del menú
+    ocultas: ojos.gestion ? [] : [...new Set([...ojos.ocultas,
+      ...(Array.isArray(per.ocultas) ? per.ocultas : [])])],
     historial, comentario: comentario ? comentario.texto : '',
     sinDatos: !yo
   });
@@ -1276,18 +1310,29 @@ app.get('/api/equipo/:periodoId', pedirLogin, async (req, res) => {
   }
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
   const montos = await montosPlus();
-  const verPlus = ve(req, await seccionesOcultas(), 'plus');
+  /* Mirando el panel de otra persona, la tabla tiene que verse como la ve ella:
+     con sus secciones ocultas y sin los permisos de quien está mirando. */
+  const ojos = await comoQuien(req);
+  const verPlus = veSeccion(ojos, per, 'plus');
+  const verTodo = ojos.gestion;
+  const quienSoy = ojos.uid;
   const filas = Object.values(porUsuario)
     .map((u) => {
       const ev = evaluar(metricas, u.valores, promedios, u);
-      // El plus de la supervisión es solo suyo: no se muestra en la tabla del equipo.
-      const propio = u.rol === 'supervisor' && u.id !== req.uid && !req.permisos.includes('ver_equipo');
-      return { ...u, ...ev, plus: (propio || !verPlus) ? null : plusDe(montos, u.rol, ev.nivel) };
+      /* Lo que cobra cada quien es suyo: en la tabla del equipo, cada persona
+         ve su propio monto y nada más. La gerencia los ve todos. El monto ni
+         siquiera sale del servidor, así que no hay forma de espiarlo. */
+      const ajeno = !verTodo && u.id !== quienSoy;
+      return { ...u, ...ev, plus: (ajeno || !verPlus) ? null : plusDe(montos, u.rol, ev.nivel) };
     })
     .sort((a, b) => b.ratio - a.ratio);
   const resumen = {};
   for (const e of ESCALA) resumen[e.clave] = filas.filter((f) => f.nivel && f.nivel.clave === e.clave).length;
-  res.json({ periodo: per, metricas, promedios, filas, resumen, escala: ESCALA });
+  res.json({
+    periodo: per, metricas, promedios, filas, resumen, escala: ESCALA,
+    // Para que la pantalla pueda aclarar por qué los demás montos van en blanco
+    plusSoloMio: verPlus && !verTodo
+  });
 });
 
 /* ---------------------------------------------------------------
@@ -1327,13 +1372,21 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
   const v = await periodoVisible(req, req.params.periodoId);
   if (v.error) return res.status(v.error).json({ error: v.msg });
   const per = v.per;
-  const completo = req.permisos.includes('ver_equipo');
+
+  /* Si Gerencia ocultó esta sección, no se manda nada. Mirando el panel de
+     otra persona cuenta lo que ve ella, no mis permisos. */
+  const ojos = await comoQuien(req);
+  if (!veSeccion(ojos, per, 'progreso')) return res.json({ periodo: per, oculto: true, filas: [] });
+
+  // Viendo el panel de otra persona, se ve su fila, no la de todo el equipo
+  const quienSoy = ojos.uid;
+  const completo = ojos.gestion;
 
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
   const vol = metricaVolumen(metricas);
   const otras = metricas.filter((m) => m.principal && m !== vol);
 
-  const visible = (u) => completo || u.id === req.uid;
+  const visible = (u) => completo || u.id === quienSoy;
   const filas = Object.values(porUsuario).filter(visible).map((u) => {
     const valor = vol ? u.valores[vol.id] ?? null : null;
     // La meta que se le exige a esta persona: la suya si la tiene, si no la del periodo.
@@ -1346,7 +1399,7 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
     const primer = String(u.nombre).split(' ')[0];
     return {
       usuarioId: u.id, nombre: u.nombre, puesto: u.puesto, avatar: u.avatar, rol: u.rol,
-      esMio: u.id === req.uid,
+      esMio: u.id === quienSoy,
       valor, faltan, exento, sinMeta,
       nota: exento
         ? `${primer} tiene rol de supervisión: su objetivo no es el volumen de chats, así que este indicador no se le exige.`
@@ -1394,7 +1447,7 @@ app.get('/api/progreso/:periodoId', pedirLogin, async (req, res) => {
             : mensajeDelMes(u.nombre, valor, metaSuya, margen);
         return {
           usuarioId: u.id, nombre: u.nombre, puesto: u.puesto, avatar: u.avatar,
-          esMio: u.id === req.uid, valor, meta: metaSuya, metaPropia: propiaM, ...(m || {})
+          esMio: u.id === quienSoy, valor, meta: metaSuya, metaPropia: propiaM, ...(m || {})
         };
       }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
     };
@@ -1422,14 +1475,6 @@ app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
   const v = await periodoVisible(req, req.params.periodoId);
   if (v.error) return res.status(v.error).json({ error: v.msg });
 
-  // Oculto para el equipo: ni global ni para este periodo en particular.
-  const ocultasGlobal = await seccionesOcultas();
-  const delPeriodo = Array.isArray(v.per.ocultas) ? v.per.ocultas : [];
-  if (!req.permisos.includes('ver_equipo')
-      && (ocultasGlobal.includes('analisis') || delPeriodo.includes('analisis'))) {
-    return res.json({ periodo: v.per, filas: [], completo: false, oculto: true });
-  }
-
   // ¿ve el de todos, o solo el suyo?
   const todos = req.permisos.includes('analisis_equipo');
 
@@ -1438,6 +1483,13 @@ app.get('/api/analisis/:periodoId', pedirLogin, async (req, res) => {
   const pedido = Number(req.query.usuarioId) || null;
   const mirando = pedido && todos ? pedido : null;
   const quien = mirando || req.uid;
+
+  /* Oculto para el equipo, en general o solo en este periodo. Mirando el panel
+     de otra persona vale lo que ve ella, no mis permisos. */
+  const ojos = await comoQuien(req);
+  if (!veSeccion(ojos, v.per, 'analisis')) {
+    return res.json({ periodo: v.per, filas: [], completo: false, oculto: true });
+  }
 
   const filas = await all(
     `SELECT a.usuario_id, a.fortalezas, a.errores, a.fuente, u.nombre, u.puesto, u.avatar, u.activo
@@ -1489,10 +1541,8 @@ app.get('/api/hoja/:periodoId', pedirLogin, async (req, res) => {
   }
 
   // Gerencia puede tenerla oculta para el equipo, en general o en este periodo
-  const ocultasGlobal = await seccionesOcultas();
-  const delPeriodo = Array.isArray(v.per.ocultas) ? v.per.ocultas : [];
-  if (!req.permisos.includes('ver_equipo')
-      && (ocultasGlobal.includes('hoja') || delPeriodo.includes('hoja'))) {
+  const ojos = await comoQuien(req);
+  if (!veSeccion(ojos, v.per, 'hoja')) {
     return res.json({ periodo: v.per, hoja: null, oculto: true });
   }
 

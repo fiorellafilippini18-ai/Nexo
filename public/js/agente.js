@@ -91,12 +91,22 @@ async function cargar() {
     api('/api/mi-desempeno/' + ACTUAL + qs()),
     api('/api/destacados/' + ACTUAL).catch(() => null),
     api('/api/palmares' + qs()).catch(() => null),
-    api('/api/equipo/' + ACTUAL).catch(() => null),
+    api('/api/equipo/' + ACTUAL + qs()).catch(() => null),
     api('/api/progreso/' + ACTUAL + qs()).catch(() => null),
     api('/api/analisis/' + ACTUAL + qs()).catch(() => null),
     api('/api/hoja/' + ACTUAL + qs()).catch(() => null)
   ]);
   DATOS = d; PODIO = podio; PALMARES = palmares; EQUIPO = equipo; PROGRESO = progreso; ANALISIS = analisis; HOJA = hoja;
+
+  /* Mirando el panel de otra persona, el menú tiene que ser el suyo: si
+     Gerencia le ocultó una sección, acá tampoco se ve. Para eso el servidor
+     manda, junto con sus datos, la lista de lo que esa persona no ve. */
+  if (VER && Array.isArray(d.ocultas)) {
+    for (const clave of d.ocultas) {
+      const b = $(`#nav button[data-v="${clave}"]`); if (b) b.remove();
+    }
+    if (d.ocultas.includes(VISTA)) VISTA = 'panel';
+  }
 
   /* La hoja propia solo existe para algunas personas: si en este periodo no
      tiene ninguna, el menú no la muestra. */
@@ -354,12 +364,15 @@ function pintarEquipo() {
       }).join('')}
       <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
-      <td class="num">${f.plus === null || f.plus === undefined ? '—' : (f.plus > 0 ? `<b>${gs(f.plus)}</b>` : 'sin plus')}</td>
+      <td class="num">${f.plus === null || f.plus === undefined
+        ? `<span style="color:var(--muted)" title="${EQUIPO.plusSoloMio ? 'El monto de cada persona es privado' : 'Sin dato'}">—</span>`
+        : (f.plus > 0 ? `<b>${gs(f.plus)}</b>` : 'sin plus')}</td>
     </tr>`;
 
   caja.innerHTML = `<div class="card">
     <h2>Resultados de ${esc(EQUIPO.periodo.etiqueta)}</h2>
-    <p class="sub">Cómo le fue a cada persona del equipo. Tu fila está resaltada.</p>
+    <p class="sub">Cómo le fue a cada persona del equipo. Tu fila está resaltada.${
+      EQUIPO.plusSoloMio ? ' <b>El plus es privado:</b> ves el tuyo, no el de tus compañeros.' : ''}</p>
     <div class="scroll"><div id="eqTabla"><table><thead><tr>
       <th>Colaborador</th>
       ${principales.map((m) => `<th class="num" title="${esc(m.nombre)}">${esc(tituloCorto(m.nombre))}</th>`).join('')}

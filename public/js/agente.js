@@ -221,7 +221,11 @@ function pintar() {
   }
 
   const n = d.nivel;
-  const principales = d.detalle.filter((m) => m.principal);
+  /* Solo los principales que tienen dato en este periodo. Si una planilla vieja
+     dejó un indicador con otro nombre, su tarjeta quedaba vacía al lado de la
+     que sí trae el número, y parecían repetidos. El desglose va en
+     "Detalle por criterio", que es la sección hecha para eso. */
+  const principales = d.detalle.filter((m) => m.principal && m.valor !== null && m.valor !== undefined);
   const secundarios = d.detalle.filter((m) => !m.principal && m.valor !== null);
 
   /* --- vista principal --- */

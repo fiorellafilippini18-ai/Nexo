@@ -1228,6 +1228,7 @@ function filaMetrica(m) {
       <td><input type="number" step="0.01" data-m="${m.id}" data-k="meta" value="${m.meta ?? ''}" style="min-width:85px;text-align:right"></td>
       <td><input data-m="${m.id}" data-k="unidad" value="${esc(m.unidad || '')}" style="min-width:70px"></td>
       <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-k="principal" ${m.principal ? 'checked' : ''} style="width:17px;height:17px"></td>
+      <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-k="criterio" ${m.criterio ? 'checked' : ''} style="width:17px;height:17px"></td>
       <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-k="exime_supervision" ${m.exime_supervision ? 'checked' : ''} style="width:17px;height:17px"></td>
       <td><input data-m="${m.id}" data-k="consejo" value="${esc(m.consejo || '')}" placeholder="Qué hacer para mejorarlo" style="min-width:260px"></td>
       <td style="text-align:right"><button class="btn sm danger" data-delm="${m.id}">Quitar</button></td>
@@ -1236,7 +1237,8 @@ function filaMetrica(m) {
 
 const CABECERA_MET = `<thead><tr>
     <th>Indicador</th><th>Mejor cuando es</th><th class="num">Meta</th><th>Unidad</th>
-    <th style="text-align:center">Principal</th>
+    <th style="text-align:center" title="Define el resultado del periodo y el plus">Principal</th>
+    <th style="text-align:center" title="Aparece en el desglose de calidad del panel de cada persona">Detalle por<br>criterio</th>
     <th style="text-align:center" title="La supervisión no se evalúa con este indicador">No aplica a<br>supervisión</th>
     <th>Consejo para el agente</th><th></th></tr></thead>`;
 
@@ -1288,8 +1290,20 @@ function avisoRepetidos(principales) {
 }
 
 function pintarMetricas() {
+  /* Tres grupos bien separados, porque son tres cosas distintas:
+     los que definen el plus, los que arman el desglose de calidad, y lo que
+     la planilla trajo de arrastre y no se le muestra a nadie. */
   const principales = METRICAS.filter((m) => m.principal);
-  const resto = METRICAS.filter((m) => !m.principal);
+  const criterios = METRICAS.filter((m) => !m.principal && m.criterio);
+  const sueltos = METRICAS.filter((m) => !m.principal && !m.criterio);
+
+  const bloque = (titulo, sub, lista, vacio) => `
+    <h3 style="margin:26px 0 4px">${titulo}${lista.length ? ` (${lista.length})` : ''}</h3>
+    <p class="sub" style="margin:0 0 12px">${sub}</p>
+    ${lista.length
+      ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${lista.map(filaMetrica).join('')}</tbody></table></div>`
+      : `<div class="vacio">${vacio}</div>`}`;
+
   $('#mtTabla').innerHTML = `
     <h3 style="margin:0 0 4px">Indicadores principales${principales.length ? ` (${principales.length})` : ''}</h3>
     <p class="sub" style="margin:0 0 12px">Son los que definen el resultado del periodo y el plus.
@@ -1298,13 +1312,21 @@ function pintarMetricas() {
     ${principales.length
       ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${principales.map(filaMetrica).join('')}</tbody></table></div>`
       : '<div class="vacio">Todavía no hay ninguno marcado como principal.</div>'}
-    ${resto.length ? `
-      <details style="margin-top:22px" ${resto.length <= 4 ? 'open' : ''}>
+
+    ${bloque('Detalle por criterio',
+      `El desglose de la calidad: los criterios con los que se evalúa cada conversación.
+       Cada persona los ve en su sección <b>Detalle por criterio</b>. No suman al plus.`,
+      criterios,
+      'Ninguno marcado todavía. Marcá abajo los que correspondan en la casilla <b>Detalle por criterio</b>.')}
+
+    ${sueltos.length ? `
+      <details style="margin-top:26px" ${sueltos.length <= 4 ? 'open' : ''}>
         <summary style="cursor:pointer;font-size:14.5px;font-weight:650;color:var(--primary)">
-          Desglose y extras (${resto.length})</summary>
-        <p class="sub" style="margin:8px 0 12px">Los criterios de calidad y lo demás que trae la planilla.
-          Se guardan y se le muestran a cada persona en <b>Detalle por criterio</b>, pero no suman al plus.</p>
-        <div class="scroll"><table>${CABECERA_MET}<tbody>${resto.map(filaMetrica).join('')}</tbody></table></div>
+          Otros datos de la planilla (${sueltos.length})</summary>
+        <p class="sub" style="margin:8px 0 12px">Columnas que la planilla trajo pero que hoy no se le muestran
+          a nadie: ni definen el plus ni aparecen en el desglose. Quedan guardadas.
+          Si alguna es un criterio de calidad, marcala en <b>Detalle por criterio</b>.</p>
+        <div class="scroll"><table>${CABECERA_MET}<tbody>${sueltos.map(filaMetrica).join('')}</tbody></table></div>
       </details>` : ''}`;
 
   $$('#mtTabla [data-unir]').forEach((b) => b.addEventListener('click', async () => {
@@ -1443,6 +1465,10 @@ $('#mtTabla').addEventListener('change', async (e) => {
     await api('/api/metricas/' + el.dataset.m, { method: 'PUT', body: { [k]: k === 'meta' ? (val === '' ? null : Number(val)) : val } });
     toast('Guardado');
     METRICAS = await api('/api/metricas');
+    /* "Principal" y "Detalle por criterio" cambian de grupo al indicador, así
+       que la tabla se vuelve a dibujar para que quede donde corresponde.
+       Lo demás no se repinta: estaría escribiendo encima de lo que tipea. */
+    if (k === 'principal' || k === 'criterio') pintarMetricas();
   } catch (err) { toast(err.message, true); }
 });
 $('#mtTabla').addEventListener('click', async (e) => {

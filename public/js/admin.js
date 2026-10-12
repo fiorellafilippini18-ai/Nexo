@@ -1297,6 +1297,10 @@ function pintarMetricas() {
   const criterios = METRICAS.filter((m) => !m.principal && m.criterio);
   const sueltos = METRICAS.filter((m) => !m.principal && !m.criterio);
 
+  /* Las secciones plegables conservan si estaban abiertas: si no, cada vez que
+     se marca una casilla la lista se cierra sola y se pierde de vista la fila. */
+  const abiertas = $$('#mtTabla details').map((d) => d.open);
+
   const bloque = (titulo, sub, lista, vacio) => `
     <h3 style="margin:26px 0 4px">${titulo}${lista.length ? ` (${lista.length})` : ''}</h3>
     <p class="sub" style="margin:0 0 12px">${sub}</p>
@@ -1320,7 +1324,7 @@ function pintarMetricas() {
       'Ninguno marcado todavía. Marcá abajo los que correspondan en la casilla <b>Detalle por criterio</b>.')}
 
     ${sueltos.length ? `
-      <details style="margin-top:26px" ${sueltos.length <= 4 ? 'open' : ''}>
+      <details style="margin-top:26px" ${abiertas[0] ?? (sueltos.length <= 4) ? 'open' : ''}>
         <summary style="cursor:pointer;font-size:14.5px;font-weight:650;color:var(--primary)">
           Otros datos de la planilla (${sueltos.length})</summary>
         <p class="sub" style="margin:8px 0 12px">Columnas que la planilla trajo pero que hoy no se le muestran
@@ -1468,7 +1472,18 @@ $('#mtTabla').addEventListener('change', async (e) => {
     /* "Principal" y "Detalle por criterio" cambian de grupo al indicador, así
        que la tabla se vuelve a dibujar para que quede donde corresponde.
        Lo demás no se repinta: estaría escribiendo encima de lo que tipea. */
-    if (k === 'principal' || k === 'criterio') pintarMetricas();
+    if (k === 'principal' || k === 'criterio') {
+      pintarMetricas();
+      /* La fila cambió de bloque. Si no se la señala, parece que la casilla se
+         destildó sola: se la lleva a la vista y se la resalta un momento. */
+      const fila = $(`#mtTabla [data-m="${el.dataset.m}"][data-k="${k}"]`);
+      if (fila) {
+        const tr = fila.closest('tr');
+        tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        tr.classList.add('recien-movida');
+        setTimeout(() => tr.classList.remove('recien-movida'), 2200);
+      }
+    }
   } catch (err) { toast(err.message, true); }
 });
 $('#mtTabla').addEventListener('click', async (e) => {

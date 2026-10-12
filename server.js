@@ -607,29 +607,37 @@ app.get('/api/metricas', pedirLogin, async (req, res) => {
 });
 
 app.post('/api/metricas', pedirLogin, pedir('indicadores'), async (req, res) => {
-  const { nombre, unidad = '', direccion = 'mayor', meta = null, decimales = 1, principal = false, consejo = '', orden = 0 } = req.body;
+  const { nombre, unidad = '', direccion = 'mayor', meta = null, decimales = 1, principal = false, consejo = '', orden = 0, criterio = false } = req.body;
   if (!nombre) return res.status(400).json({ error: 'Falta el nombre' });
+  // Un indicador es principal o es del desglose, no las dos cosas
+  const esCrit = !!criterio && !principal;
   const m = await one(
-    `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     ON CONFLICT (nombre) DO UPDATE SET unidad=$2, direccion=$3, meta=$4, decimales=$5, principal=$6, consejo=$7, orden=$8, activa=TRUE
+    `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden, criterio)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (nombre) DO UPDATE SET unidad=$2, direccion=$3, meta=$4, decimales=$5, principal=$6, consejo=$7, orden=$8, criterio=$9, activa=TRUE
      RETURNING *`,
-    [nombre.trim(), unidad, direccion === 'menor' ? 'menor' : 'mayor', meta, decimales, !!principal, consejo, orden]);
+    [nombre.trim(), unidad, direccion === 'menor' ? 'menor' : 'mayor', meta, decimales, !!principal, consejo, orden, esCrit]);
   res.json(m);
 });
 
 app.put('/api/metricas/:id', pedirLogin, pedir('indicadores'), async (req, res) => {
-  const { unidad, direccion, meta, decimales, principal, consejo, orden, nombre, exime_supervision } = req.body;
+  const { unidad, direccion, meta, decimales, principal, consejo, orden, nombre, exime_supervision, criterio } = req.body;
   /* La pantalla de indicadores manda de a un campo por vez. La meta solo se toca
      si vino en el pedido: si no, cambiar la unidad o una casilla borraba la meta. */
   const tocaMeta = Object.prototype.hasOwnProperty.call(req.body, 'meta');
+  /* "Principal" y "Detalle por criterio" se excluyen: un indicador define el
+     plus o desglosa la calidad, no las dos cosas. Marcar uno destilda el otro. */
+  const crit = criterio === undefined ? null : !!criterio;
   await q(`UPDATE metricas SET nombre=COALESCE($1,nombre), unidad=COALESCE($2,unidad), direccion=COALESCE($3,direccion),
            meta=CASE WHEN $11 THEN $4::numeric ELSE meta END,
            decimales=COALESCE($5,decimales), principal=COALESCE($6,principal), consejo=COALESCE($7,consejo),
-           orden=COALESCE($8,orden), exime_supervision=COALESCE($10,exime_supervision)
+           orden=COALESCE($8,orden), exime_supervision=COALESCE($10,exime_supervision),
+           criterio=COALESCE($12,criterio)
            WHERE id=$9`,
     [nombre, unidad, direccion, meta === '' ? null : meta, decimales, principal, consejo, orden, req.params.id,
-     exime_supervision === undefined ? null : !!exime_supervision, tocaMeta]);
+     exime_supervision === undefined ? null : !!exime_supervision, tocaMeta, crit]);
+  if (principal === true) await q('UPDATE metricas SET criterio=FALSE WHERE id=$1', [req.params.id]);
+  if (crit === true) await q('UPDATE metricas SET principal=FALSE WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 });
 
@@ -1130,9 +1138,9 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
         const nombre = String(c.nombre || '').trim();
         if (!nombre) continue;
         const r = await cliente.query(
-          `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden)
-           VALUES ($1,'puntos','mayor',NULL,2,FALSE,'',50)
-           ON CONFLICT (nombre) DO UPDATE SET activa=TRUE
+          `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden, criterio)
+           VALUES ($1,'puntos','mayor',NULL,2,FALSE,'',50,TRUE)
+           ON CONFLICT (nombre) DO UPDATE SET activa=TRUE, criterio=TRUE
            RETURNING id`, [nombre]);
         const mid = r.rows[0].id;
         for (const [texto, valor] of Object.entries(c.valores || {})) {

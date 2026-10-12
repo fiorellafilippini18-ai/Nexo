@@ -763,3 +763,11 @@ body.modo-preview .btn.primary, body.modo-preview .btn.danger{opacity:.5;pointer
 .an-lista li:last-child{margin-bottom:0}
 .tabla-analisis .an-lista{padding-left:16px;font-size:13.5px}
 .tabla-analisis .an-lista li{margin-bottom:5px}
+
+/* Al marcar "Principal" o "Detalle por criterio", el indicador cambia de
+   bloque. Se lo resalta un momento para que se vea adónde fue. */
+@keyframes recienMovida {
+  from { background: var(--primary-bg, color-mix(in srgb, var(--primary) 18%, transparent)); }
+  to   { background: transparent; }
+}
+tr.recien-movida td { animation: recienMovida 2.2s ease-out }

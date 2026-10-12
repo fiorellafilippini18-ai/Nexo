@@ -260,3 +260,20 @@ CREATE TABLE IF NOT EXISTS hoja_autorizados (
   usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
   PRIMARY KEY (dueno_id, usuario_id)
 );
+
+/* Qué indicadores arman el "Detalle por criterio".
+   Antes era "todo lo que no es principal", así que cualquier columna suelta de
+   la planilla (submuestras, porcentajes auxiliares) terminaba mezclada con los
+   7 criterios de calidad. Ahora se marca a mano, igual que "principal". */
+ALTER TABLE metricas ADD COLUMN IF NOT EXISTS criterio BOOLEAN NOT NULL DEFAULT FALSE;
+
+/* La primera vez se copia el estado de siempre —lo que no es principal va al
+   desglose— para que nadie vea su panel vacío. Después lo decide Gerencia,
+   así que esto no se vuelve a correr. */
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM config WHERE clave = 'criterio_migrado') THEN
+    UPDATE metricas SET criterio = TRUE WHERE NOT principal;
+    INSERT INTO config (clave, valor) VALUES ('criterio_migrado', '1');
+  END IF;
+END $$;

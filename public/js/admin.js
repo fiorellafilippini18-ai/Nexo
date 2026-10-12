@@ -1293,45 +1293,22 @@ function pintarMetricas() {
   /* Tres grupos bien separados, porque son tres cosas distintas:
      los que definen el plus, los que arman el desglose de calidad, y lo que
      la planilla trajo de arrastre y no se le muestra a nadie. */
+  /* Una sola tabla con todos los indicadores y las dos casillas. Nada de
+     bloques separados: al marcar una casilla la fila tiene que quedarse
+     donde está, si no se mueve de abajo del cursor y parece que no guardó. */
   const principales = METRICAS.filter((m) => m.principal);
-  const criterios = METRICAS.filter((m) => !m.principal && m.criterio);
-  const sueltos = METRICAS.filter((m) => !m.principal && !m.criterio);
-
-  /* Las secciones plegables conservan si estaban abiertas: si no, cada vez que
-     se marca una casilla la lista se cierra sola y se pierde de vista la fila. */
-  const abiertas = $$('#mtTabla details').map((d) => d.open);
-
-  const bloque = (titulo, sub, lista, vacio) => `
-    <h3 style="margin:26px 0 4px">${titulo}${lista.length ? ` (${lista.length})` : ''}</h3>
-    <p class="sub" style="margin:0 0 12px">${sub}</p>
-    ${lista.length
-      ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${lista.map(filaMetrica).join('')}</tbody></table></div>`
-      : `<div class="vacio">${vacio}</div>`}`;
 
   $('#mtTabla').innerHTML = `
-    <h3 style="margin:0 0 4px">Indicadores principales${principales.length ? ` (${principales.length})` : ''}</h3>
-    <p class="sub" style="margin:0 0 12px">Son los que definen el resultado del periodo y el plus.
-      Lo esperable son tres: chats respondidos, calidad y tiempo de respuesta.</p>
+    <h3 style="margin:0 0 4px">Indicadores${METRICAS.length ? ` (${METRICAS.length})` : ''}</h3>
+    <p class="sub" style="margin:0 0 12px">
+      <b>Principal:</b> define el resultado del periodo y el plus. Lo esperable son tres:
+      chats respondidos, calidad y tiempo de respuesta.<br>
+      <b>Detalle por criterio:</b> aparece en el desglose de calidad del panel de cada persona, sin sumar al plus.<br>
+      Las dos casillas se excluyen, y lo que no tenga ninguna marcada queda guardado pero no se le muestra a nadie.</p>
     ${puede(YO, 'indicadores') ? avisoRepetidos(principales) : ''}
-    ${principales.length
-      ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${principales.map(filaMetrica).join('')}</tbody></table></div>`
-      : '<div class="vacio">Todavía no hay ninguno marcado como principal.</div>'}
-
-    ${bloque('Detalle por criterio',
-      `El desglose de la calidad: los criterios con los que se evalúa cada conversación.
-       Cada persona los ve en su sección <b>Detalle por criterio</b>. No suman al plus.`,
-      criterios,
-      'Ninguno marcado todavía. Marcá abajo los que correspondan en la casilla <b>Detalle por criterio</b>.')}
-
-    ${sueltos.length ? `
-      <details style="margin-top:26px" ${abiertas[0] ?? (sueltos.length <= 4) ? 'open' : ''}>
-        <summary style="cursor:pointer;font-size:14.5px;font-weight:650;color:var(--primary)">
-          Otros datos de la planilla (${sueltos.length})</summary>
-        <p class="sub" style="margin:8px 0 12px">Columnas que la planilla trajo pero que hoy no se le muestran
-          a nadie: ni definen el plus ni aparecen en el desglose. Quedan guardadas.
-          Si alguna es un criterio de calidad, marcala en <b>Detalle por criterio</b>.</p>
-        <div class="scroll"><table>${CABECERA_MET}<tbody>${sueltos.map(filaMetrica).join('')}</tbody></table></div>
-      </details>` : ''}`;
+    ${METRICAS.length
+      ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${METRICAS.map(filaMetrica).join('')}</tbody></table></div>`
+      : '<div class="vacio">Todavía no hay ningún indicador.</div>'}`;
 
   $$('#mtTabla [data-unir]').forEach((b) => b.addEventListener('click', async () => {
     const clave = b.dataset.unir;
@@ -1472,19 +1449,20 @@ $('#mtTabla').addEventListener('change', async (e) => {
     /* "Principal" y "Detalle por criterio" cambian de grupo al indicador, así
        que la tabla se vuelve a dibujar para que quede donde corresponde.
        Lo demás no se repinta: estaría escribiendo encima de lo que tipea. */
-    if (k === 'principal' || k === 'criterio') {
-      pintarMetricas();
-      /* La fila cambió de bloque. Si no se la señala, parece que la casilla se
-         destildó sola: se la lleva a la vista y se la resalta un momento. */
-      const fila = $(`#mtTabla [data-m="${el.dataset.m}"][data-k="${k}"]`);
-      if (fila) {
-        const tr = fila.closest('tr');
-        tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        tr.classList.add('recien-movida');
-        setTimeout(() => tr.classList.remove('recien-movida'), 2200);
-      }
+    /* "Principal" y "Detalle por criterio" se excluyen: al marcar una, se
+       destilda la otra de esa misma fila. Se toca esa casilla y nada más: si
+       se redibujara la tabla, la fila se movería de abajo del cursor y
+       parecería que la marca no se guardó. */
+    if ((k === 'principal' || k === 'criterio') && val === true) {
+      const otra = k === 'principal' ? 'criterio' : 'principal';
+      const par = $(`#mtTabla input[data-m="${el.dataset.m}"][data-k="${otra}"]`);
+      if (par) par.checked = false;
     }
-  } catch (err) { toast(err.message, true); }
+  } catch (err) {
+    // No se guardó: la casilla vuelve a como estaba, para no mentir en pantalla
+    if (el.type === 'checkbox') el.checked = !el.checked;
+    toast(err.message, true);
+  }
 });
 $('#mtTabla').addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-delm]'); if (!b) return;

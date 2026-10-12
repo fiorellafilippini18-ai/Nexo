@@ -638,6 +638,59 @@ app.delete('/api/metricas/:id', pedirLogin, pedir('indicadores'), async (req, re
   res.json({ ok: true });
 });
 
+/**
+ * Unir dos indicadores que miden lo mismo.
+ *
+ * Pasa cuando la planilla le cambia el nombre a una columna de un mes al otro:
+ * "Chats Atendidos" en julio, "TOTAL chats" en septiembre. Quedan dos
+ * indicadores principales midiendo lo mismo, cada uno con la mitad de la
+ * historia, y la evolución se corta. Esto mueve los resultados del que sobra
+ * al que queda y lo desactiva. Si una persona ya tiene valor en el destino
+ * para ese periodo, gana el del destino: no se pisa nada cargado.
+ */
+app.post('/api/metricas/:id/unir', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const origen = Number(req.params.id);
+  const destino = Number(req.body.destinoId);
+  if (!origen || !destino || origen === destino) {
+    return res.status(400).json({ error: 'Hay que elegir dos indicadores distintos' });
+  }
+  const a = await one('SELECT * FROM metricas WHERE id=$1', [origen]);
+  const b = await one('SELECT * FROM metricas WHERE id=$1', [destino]);
+  if (!a || !b) return res.status(404).json({ error: 'No encuentro alguno de los dos indicadores' });
+
+  const cliente = await pool.connect();
+  let movidos = 0;
+  try {
+    await cliente.query('BEGIN');
+    const r = await cliente.query(
+      `UPDATE resultados r SET metrica_id=$2
+        WHERE r.metrica_id=$1
+          AND NOT EXISTS (SELECT 1 FROM resultados d
+                           WHERE d.periodo_id=r.periodo_id AND d.usuario_id=r.usuario_id AND d.metrica_id=$2)`,
+      [origen, destino]);
+    movidos = r.rowCount;
+    await cliente.query('DELETE FROM resultados WHERE metrica_id=$1', [origen]);
+    // Las metas del que sobra solo se copian donde el destino no tenga una propia
+    await cliente.query(
+      `INSERT INTO metas_periodo (periodo_id, metrica_id, meta)
+       SELECT periodo_id, $2, meta FROM metas_periodo WHERE metrica_id=$1
+       ON CONFLICT (periodo_id, metrica_id) DO NOTHING`, [origen, destino]);
+    await cliente.query(
+      `INSERT INTO metas_persona (usuario_id, metrica_id, meta)
+       SELECT usuario_id, $2, meta FROM metas_persona WHERE metrica_id=$1
+       ON CONFLICT (usuario_id, metrica_id) DO NOTHING`, [origen, destino]);
+    await cliente.query('DELETE FROM metas_periodo WHERE metrica_id=$1', [origen]);
+    await cliente.query('DELETE FROM metas_persona WHERE metrica_id=$1', [origen]);
+    await cliente.query('UPDATE metricas SET activa=FALSE, principal=FALSE WHERE id=$1', [origen]);
+    await cliente.query('COMMIT');
+  } catch (e) {
+    await cliente.query('ROLLBACK');
+    return res.status(500).json({ error: e.message });
+  } finally { cliente.release(); }
+
+  res.json({ ok: true, movidos, origen: a.nombre, destino: b.nombre });
+});
+
 /* --- Metas de un periodo puntual ---
    La meta puede cambiar mes a mes. Acá se ve y se edita la de cada periodo,
    sin tocar la meta general ni los periodos ya cerrados. */
@@ -807,6 +860,24 @@ app.delete('/api/periodos/:id', pedirLogin, pedir('periodos'), async (req, res) 
 /* ---------------------------------------------------------------
    Subida de planilla: paso 1 (analizar) y paso 2 (confirmar)
 --------------------------------------------------------------- */
+/* Los tres conceptos que definen el desempeño. Son los únicos que conviene
+   unificar solos: del resto, dos columnas parecidas pueden ser cosas distintas. */
+const CONCEPTOS_PRINCIPALES = ['chats', 'calidad', 'tiempo'];
+
+/**
+ * El indicador principal que ya mide este mismo concepto, si hay exactamente
+ * uno. Sirve para que "TOTAL chats" se guarde en "Chats Atendidos" en vez de
+ * crear un segundo indicador principal que mide lo mismo.
+ */
+function delMismoConcepto(metricas, titulo) {
+  const clave = claveIndicador(titulo);
+  if (!clave || !CONCEPTOS_PRINCIPALES.includes(clave)) return null;
+  // Una submuestra no es el indicador: "Chats en turno evaluados" mide otra cosa.
+  if (/(evaluad|muestra|detalle|parcial|subtotal|de la muestra)/i.test(titulo)) return null;
+  const iguales = metricas.filter((m) => m.principal && claveIndicador(m.nombre) === clave);
+  return iguales.length === 1 ? iguales[0] : null;
+}
+
 app.post('/api/analizar', pedirLogin, pedir('cargar'), upload.single('archivo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No llegó ningún archivo' });
   let info;
@@ -829,10 +900,18 @@ app.post('/api/analizar', pedirLogin, pedir('cargar'), upload.single('archivo'),
     const yaPrincipal = new Set();   // un solo indicador principal por concepto
     for (const c of h.columnas) {
       if (!c.numerica) continue;
-      const existente = metricas.find((m) => normTxt(m.nombre) === normTxt(c.titulo));
+      const exacto = metricas.find((m) => normTxt(m.nombre) === normTxt(c.titulo));
+      /* Cada planilla llama distinto a la misma columna: "Chats Atendidos" un
+         mes, "TOTAL chats" al otro. Si ya hay un indicador principal del mismo
+         concepto, se propone guardar ahí en vez de crear uno nuevo: si no, el
+         equipo termina con seis indicadores principales y la mitad vacíos. Se
+         puede cambiar en la pantalla de revisión. */
+      const mismoConcepto = exacto ? null : delMismoConcepto(metricas, c.titulo);
+      const existente = exacto || mismoConcepto;
       const vals = h.filas.map((f) => f.valores[c.titulo] ?? null);
       c.config = existente
-        ? { metricaId: existente.id, nombre: existente.nombre, direccion: existente.direccion, meta: existente.meta === null ? null : Number(existente.meta), unidad: existente.unidad, decimales: existente.decimales, principal: existente.principal, nueva: false }
+        ? { metricaId: existente.id, nombre: existente.nombre, direccion: existente.direccion, meta: existente.meta === null ? null : Number(existente.meta), unidad: existente.unidad, decimales: existente.decimales, principal: existente.principal, nueva: false,
+            reusa: mismoConcepto ? c.titulo : null }
         : { metricaId: null, nombre: c.titulo, ...sugerir(c.titulo, vals), nueva: true };
 
       // "Chats en turno evaluados" no es el indicador de carga: es una submuestra.

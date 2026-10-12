@@ -305,6 +305,7 @@ function pintarRevision() {
     </div>` : ''}
 
     ${avisoPeriodo()}
+    ${avisoReusa()}
     ${avisoExtras()}
     ${sinMapear ? `<div class="aviso warn">Hay <b>${sinMapear}</b> nombre(s) de la planilla que no reconozco. Asignalos abajo o quedarán fuera de la carga.</div>` : `<div class="aviso ok">Reconocí a las ${HOJA.personasMapeadas.length} personas de la planilla.</div>`}
 
@@ -410,6 +411,17 @@ function avisarPrincipales() {
     pero el periodo va a quedar sin resultado: no se evalúa a nadie y la tabla del equipo sale vacía.
     Marcá como <b>principal</b> las columnas que definen el desempeño (chats, calidad, tiempo de respuesta)
     y ponéles su meta.`;
+}
+
+/** Columnas que este archivo llama distinto pero son un indicador que ya existe. */
+function avisoReusa() {
+  const reusadas = (HOJA.columnas || []).filter((c) => c.numerica && c.config && c.config.reusa);
+  if (!reusadas.length) return '';
+  return `<div class="aviso info">
+    Este archivo le cambió el nombre a ${reusadas.length === 1 ? 'una columna que ya existe' : 'algunas columnas que ya existen'},
+    así que ${reusadas.length === 1 ? 'se va a guardar' : 'se van a guardar'} en el indicador de siempre y no se duplica nada:
+    ${reusadas.map((c) => `<b>${esc(c.titulo)}</b> → <b>${esc(c.config.nombre)}</b>`).join(' · ')}.
+    Si no es lo mismo, cambiá el nombre en <b>"Se guarda como"</b> y se crea aparte.</div>`;
 }
 
 async function importar() {
@@ -1228,6 +1240,53 @@ const CABECERA_MET = `<thead><tr>
     <th style="text-align:center" title="La supervisión no se evalúa con este indicador">No aplica a<br>supervisión</th>
     <th>Consejo para el agente</th><th></th></tr></thead>`;
 
+/* Los conceptos que puede medir un indicador principal, para detectar repetidos. */
+const CONCEPTO_MET = [
+  ['chats',   /(chats?|conversacion|atencion|ticket|caso)/i],
+  ['calidad', /(calidad|puntaje|score)/i],
+  ['tiempo',  /(tiempo\s*de\s*respuesta|t\.?\s*resp|primera\s*respuesta|espera|demora)/i]
+];
+const conceptoDe = (nombre) => {
+  const t = String(nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+  // El tiempo primero: "Tiempo de Respuesta en Turno" también dice "respuesta"
+  for (const [clave, re] of [...CONCEPTO_MET].reverse()) if (re.test(t)) return clave;
+  return null;
+};
+
+/** Si dos indicadores principales miden lo mismo, ofrecemos unirlos. */
+function avisoRepetidos(principales) {
+  const grupos = {};
+  for (const m of principales) {
+    const c = conceptoDe(m.nombre);
+    if (c) (grupos[c] ||= []).push(m);
+  }
+  const repes = Object.entries(grupos).filter(([, lista]) => lista.length > 1);
+  if (!repes.length) return '';
+
+  const nombre = { chats: 'chats respondidos', calidad: 'calidad', tiempo: 'tiempo de respuesta' };
+  return `<div class="aviso warn" style="margin:0 0 16px">
+    <b>Hay indicadores principales repetidos.</b> Cada planilla le puso otro nombre a la misma
+    columna, así que quedaron midiendo lo mismo con la historia partida al medio: cada agente ve
+    tarjetas vacías y su evolución se corta. Unilos y queda uno solo, con todos los periodos.
+    ${repes.map(([c, lista]) => {
+      const destino = lista[0];
+      return `<div style="margin-top:12px">
+        <div style="font-size:13.5px"><b>${esc(nombre[c] || c)}</b> — ${lista.length} indicadores:</div>
+        <div class="alias-lista" style="margin-top:7px">
+          ${lista.map((m) => `<span class="alias-chip">${esc(m.nombre)}</span>`).join('')}
+        </div>
+        <div class="flex" style="gap:9px;margin-top:9px;flex-wrap:wrap">
+          <span class="sub" style="margin:0">Dejar todo en:</span>
+          <select data-unirdest="${c}" style="max-width:280px">
+            ${lista.map((m) => `<option value="${m.id}"${m.id === destino.id ? ' selected' : ''}>${esc(m.nombre)}</option>`).join('')}
+          </select>
+          <button class="btn sm primary" data-unir="${c}">Unir los ${lista.length}</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function pintarMetricas() {
   const principales = METRICAS.filter((m) => m.principal);
   const resto = METRICAS.filter((m) => !m.principal);
@@ -1235,6 +1294,7 @@ function pintarMetricas() {
     <h3 style="margin:0 0 4px">Indicadores principales${principales.length ? ` (${principales.length})` : ''}</h3>
     <p class="sub" style="margin:0 0 12px">Son los que definen el resultado del periodo y el plus.
       Lo esperable son tres: chats respondidos, calidad y tiempo de respuesta.</p>
+    ${puede(YO, 'indicadores') ? avisoRepetidos(principales) : ''}
     ${principales.length
       ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${principales.map(filaMetrica).join('')}</tbody></table></div>`
       : '<div class="vacio">Todavía no hay ninguno marcado como principal.</div>'}
@@ -1246,6 +1306,27 @@ function pintarMetricas() {
           Se guardan y se le muestran a cada persona en <b>Detalle por criterio</b>, pero no suman al plus.</p>
         <div class="scroll"><table>${CABECERA_MET}<tbody>${resto.map(filaMetrica).join('')}</tbody></table></div>
       </details>` : ''}`;
+
+  $$('#mtTabla [data-unir]').forEach((b) => b.addEventListener('click', async () => {
+    const clave = b.dataset.unir;
+    const destinoId = Number($(`#mtTabla [data-unirdest="${clave}"]`).value);
+    const lista = METRICAS.filter((m) => m.principal && conceptoDe(m.nombre) === clave && m.id !== destinoId);
+    const destino = METRICAS.find((m) => m.id === destinoId);
+    if (!lista.length || !destino) return;
+    if (!confirm(`Se van a unir en "${destino.nombre}":\n\n${lista.map((m) => '· ' + m.nombre).join('\n')}\n\n`
+      + 'Los datos cargados se mueven ahí y esos indicadores dejan de usarse.\n'
+      + 'No se borra ningún número: si una persona ya tenía valor en el que queda, se conserva ese.\n\n¿Continuar?')) return;
+    b.disabled = true; b.textContent = 'Uniendo…';
+    try {
+      let movidos = 0;
+      for (const m of lista) {
+        const r = await api(`/api/metricas/${m.id}/unir`, { method: 'POST', body: { destinoId } });
+        movidos += r.movidos;
+      }
+      toast(`✓ Unidos en "${destino.nombre}" — se movieron ${movidos} valores`);
+      await recargar();
+    } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Unir'; }
+  }));
 }
 
 /* ---------------- qué ve el equipo ---------------- */

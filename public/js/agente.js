@@ -226,7 +226,10 @@ function pintar() {
      que sí trae el número, y parecían repetidos. El desglose va en
      "Detalle por criterio", que es la sección hecha para eso. */
   const principales = d.detalle.filter((m) => m.principal && m.valor !== null && m.valor !== undefined);
-  const secundarios = d.detalle.filter((m) => !m.principal && m.valor !== null);
+  /* El desglose son los indicadores marcados como "Detalle por criterio", no
+     todo lo que sobra: así una columna auxiliar de la planilla no se mezcla
+     con los criterios de calidad. */
+  const secundarios = d.detalle.filter((m) => m.criterio && m.valor !== null);
 
   /* --- vista principal --- */
   let html = podioHTML(PODIO, dePanel());

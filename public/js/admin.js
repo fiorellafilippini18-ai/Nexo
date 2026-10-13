@@ -502,9 +502,12 @@ async function cargarEquipo() {
          ${conValores.length ? '<b>' + conValores.map((m) => esc(m.nombre)).join('</b>, <b>') + '</b>' : '—'},
          y ninguno de esos indicadores está marcado como <b>principal</b>, que es lo que define
          el resultado y el plus.<br>
-         Entrá a <b>Indicadores</b>, marcá como principales los que correspondan y ponéles su meta.
-         Si son el mismo indicador de siempre con otro nombre, conviene renombrar la columna
-         al importar para que no se dupliquen.
+         El desempeño se mide siempre con los mismos tres —chats atendidos, calidad y tiempo de
+         respuesta— así que puedo dejarlos marcados yo: de cada concepto queda el que más datos
+         tiene, y los criterios de calidad se van al desglose. No se borra ningún número.
+         ${puede(YO, 'indicadores')
+            ? '<div style="margin-top:12px"><button class="btn sm primary" id="btnReparar">Dejar los 3 indicadores como corresponde</button></div>'
+            : ''}
        </div>`
     : '';
   try {
@@ -547,6 +550,26 @@ async function cargarEquipo() {
            title="Ver su panel tal como lo ve esa persona">👁 Ver panel</a></td>
     </tr>`).join('')}</tbody></table>`
     : '<div class="vacio">No hay datos cargados en este periodo.</div>';
+
+  activarReparar(() => cargarEquipo());
+}
+
+/** El botón que deja los tres indicadores principales como corresponde. */
+function activarReparar(despues) {
+  const b = $('#btnReparar'); if (!b) return;
+  b.addEventListener('click', async () => {
+    b.disabled = true; b.textContent = 'Revisando…';
+    try {
+      const r = await api('/api/metricas/reparar', { method: 'POST' });
+      const partes = [];
+      if (r.principales.length) partes.push(`principales: ${r.principales.join(', ')}`);
+      if (r.alDesglose.length) partes.push(`al desglose: ${r.alDesglose.join(', ')}`);
+      if (r.destildados.length) partes.push(`ya no principales: ${r.destildados.join(', ')}`);
+      toast(partes.length ? '✓ ' + partes.join(' · ') : 'Ya estaban bien');
+      METRICAS = await api('/api/metricas');
+      if (despues) await despues();
+    } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Dejar los 3 indicadores como corresponde'; }
+  });
 }
 
 $('#coGuardar')?.addEventListener('click', async () => {
@@ -1255,6 +1278,32 @@ const conceptoDe = (nombre) => {
   return null;
 };
 
+/**
+ * Cuáles son los tres principales hoy, y el botón para enderezarlos.
+ * Se muestra siempre: es la parte que no tiene que cambiar nunca, y conviene
+ * poder verla de un vistazo sin recorrer toda la tabla.
+ */
+function avisoPrincipalesFijos(principales) {
+  const falta = ['chats respondidos', 'calidad', 'tiempo de respuesta']
+    .filter((n, i) => !principales.some((m) => conceptoDe(m.nombre) === ['chats', 'calidad', 'tiempo'][i]));
+  const bien = !falta.length && principales.length === 3;
+
+  return `<div class="aviso ${bien ? 'ok' : 'warn'}" style="margin:0 0 16px">
+    <b>El desempeño se mide siempre con estos tres.</b>
+    ${principales.length
+      ? `<div class="alias-lista" style="margin-top:9px">${principales
+          .map((m) => `<span class="alias-chip">${esc(m.nombre)}${m.meta === null ? '' :
+            ` · ${m.direccion === 'menor' ? 'hasta' : 'desde'} ${nfmt(m.meta, m.decimales)}${m.unidad ? ' ' + esc(m.unidad) : ''}`}</span>`).join('')}</div>`
+      : ''}
+    ${bien
+      ? '<div class="sub" style="margin-top:9px">Están los tres y no se mezclan con el desglose de calidad. Se revisan solos en cada carga.</div>'
+      : `<div class="sub" style="margin-top:9px">Falta${falta.length === 1 ? '' : 'n'}: <b>${falta.join('</b>, <b>')}</b>.
+           Puedo dejarlos marcados: de cada concepto queda el que más datos tiene, y los criterios de calidad
+           se van al desglose. No se borra ningún número.</div>
+         <div style="margin-top:11px"><button class="btn sm primary" id="btnReparar">Dejar los 3 indicadores como corresponde</button></div>`}
+  </div>`;
+}
+
 /** Si dos indicadores principales miden lo mismo, ofrecemos unirlos. */
 function avisoRepetidos(principales) {
   const grupos = {};
@@ -1305,10 +1354,13 @@ function pintarMetricas() {
       chats respondidos, calidad y tiempo de respuesta.<br>
       <b>Detalle por criterio:</b> aparece en el desglose de calidad del panel de cada persona, sin sumar al plus.<br>
       Las dos casillas se excluyen, y lo que no tenga ninguna marcada queda guardado pero no se le muestra a nadie.</p>
+    ${puede(YO, 'indicadores') ? avisoPrincipalesFijos(principales) : ''}
     ${puede(YO, 'indicadores') ? avisoRepetidos(principales) : ''}
     ${METRICAS.length
       ? `<div class="scroll"><table>${CABECERA_MET}<tbody>${METRICAS.map(filaMetrica).join('')}</tbody></table></div>`
       : '<div class="vacio">Todavía no hay ningún indicador.</div>'}`;
+
+  activarReparar(() => recargar());
 
   $$('#mtTabla [data-unir]').forEach((b) => b.addEventListener('click', async () => {
     const clave = b.dataset.unir;

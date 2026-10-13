@@ -881,10 +881,95 @@ function delMismoConcepto(metricas, titulo) {
   const clave = claveIndicador(titulo);
   if (!clave || !CONCEPTOS_PRINCIPALES.includes(clave)) return null;
   // Una submuestra no es el indicador: "Chats en turno evaluados" mide otra cosa.
-  if (/(evaluad|muestra|detalle|parcial|subtotal|de la muestra)/i.test(titulo)) return null;
+  if (RE_SUBMUESTRA.test(titulo)) return null;
   const iguales = metricas.filter((m) => m.principal && claveIndicador(m.nombre) === clave);
   return iguales.length === 1 ? iguales[0] : null;
 }
+
+const RE_SUBMUESTRA = /(evaluad|muestra|detalle|parcial|subtotal|de la muestra)/i;
+
+/* Los siete criterios con los que se puntúa cada conversación. Son el desglose
+   de la calidad: nunca definen el plus, por más que la planilla los traiga
+   como una columna más al lado de los tres indicadores. */
+const CRITERIOS_CALIDAD = ['precision', 'fcr', 'redaccion', 'personal', 'emocional', 'protocolo', 'clara'];
+
+/** La meta de fábrica de cada indicador principal. */
+const META_PRINCIPAL = { chats: 1200, calidad: 7, tiempo: 35 };
+
+/**
+ * Deja los tres indicadores principales como corresponde.
+ *
+ * El desempeño se mide siempre con los mismos tres —chats atendidos, calidad y
+ * tiempo de respuesta— pero cada planilla les pone otro nombre, y alcanza con
+ * destildar una casilla para que un periodo entero quede sin nada que evaluar.
+ * Así que no se confía en que la marca sobreviva: se recalcula.
+ *
+ *  · De cada concepto queda uno solo como principal: el que tiene más datos
+ *    cargados. Los demás dejan de serlo, pero no se borra ningún número.
+ *  · Los criterios de calidad pasan al desglose, nunca a principal.
+ *
+ * Corre al arrancar y después de cada carga, y también se puede pedir a mano.
+ */
+async function repararIndicadores(ejecutar = q) {
+  const metricas = await all(
+    `SELECT m.*, (SELECT count(*) FROM resultados r WHERE r.metrica_id = m.id)::int AS usos
+       FROM metricas m WHERE m.activa`);
+  const hecho = { principales: [], alDesglose: [], destildados: [] };
+
+  // 1. Un criterio de calidad va al desglose, pase lo que pase.
+  for (const m of metricas) {
+    const k = claveIndicador(m.nombre);
+    if (!k || !CRITERIOS_CALIDAD.includes(k)) continue;
+    if (m.principal || !m.criterio) {
+      await ejecutar('UPDATE metricas SET principal=FALSE, criterio=TRUE WHERE id=$1', [m.id]);
+      hecho.alDesglose.push(m.nombre);
+    }
+  }
+
+  // 2. Un solo principal por concepto: el que más datos tiene cargados.
+  for (const concepto of CONCEPTOS_PRINCIPALES) {
+    const candidatos = metricas
+      .filter((m) => claveIndicador(m.nombre) === concepto && !RE_SUBMUESTRA.test(m.nombre))
+      .sort((a, b) => (b.usos - a.usos) || (Number(b.principal) - Number(a.principal)) || (a.id - b.id));
+    if (!candidatos.length) continue;
+
+    const elegido = candidatos[0];
+    if (!elegido.principal || elegido.criterio) {
+      await ejecutar('UPDATE metricas SET principal=TRUE, criterio=FALSE WHERE id=$1', [elegido.id]);
+      hecho.principales.push(elegido.nombre);
+    }
+    // Sin meta no se puede evaluar a nadie; se le pone la de siempre.
+    if (elegido.meta === null || elegido.meta === undefined) {
+      await ejecutar('UPDATE metricas SET meta=$2 WHERE id=$1', [elegido.id, META_PRINCIPAL[concepto]]);
+    }
+    for (const otro of candidatos.slice(1)) {
+      if (!otro.principal) continue;
+      await ejecutar('UPDATE metricas SET principal=FALSE WHERE id=$1', [otro.id]);
+      hecho.destildados.push(otro.nombre);
+    }
+  }
+
+  /* 3. Un solo criterio por concepto en el desglose. Los criterios también
+     cambian de nombre de un mes al otro ("2.1 Precisión de Información" y
+     "Precisión de información"), y si se acumulan, el desglose muestra el
+     doble de filas con la historia partida. */
+  for (const concepto of CRITERIOS_CALIDAD) {
+    const candidatos = metricas
+      .filter((m) => claveIndicador(m.nombre) === concepto)
+      .sort((a, b) => (b.usos - a.usos) || (Number(b.criterio) - Number(a.criterio)) || (a.id - b.id));
+    if (candidatos.length < 2) continue;
+    for (const otro of candidatos.slice(1)) {
+      if (!otro.criterio) continue;
+      await ejecutar('UPDATE metricas SET criterio=FALSE WHERE id=$1', [otro.id]);
+      hecho.fueraDelDesglose = (hecho.fueraDelDesglose || []).concat(otro.nombre);
+    }
+  }
+  return hecho;
+}
+
+app.post('/api/metricas/reparar', pedirLogin, pedir('indicadores'), async (req, res) => {
+  res.json({ ok: true, ...(await repararIndicadores()) });
+});
 
 app.post('/api/analizar', pedirLogin, pedir('cargar'), upload.single('archivo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No llegó ningún archivo' });
@@ -1134,15 +1219,29 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
     if (criterios && Array.isArray(criterios.filas) && criterios.filas.length) {
       const deTexto = {};
       for (const p of (criterios.personas || [])) if (p.usuarioId) deTexto[p.texto] = p.usuarioId;
+      /* El desglose también cambia de nombre entre meses. Si ya hay un criterio
+         que mide lo mismo, se usa ese en vez de crear otro: si no, el panel
+         termina con catorce filas donde tiene que haber siete. */
+      const yaHay = await all('SELECT id, nombre FROM metricas WHERE activa AND criterio');
+      const porConcepto = new Map();
+      for (const m of yaHay) {
+        const k = claveIndicador(m.nombre);
+        if (k && CRITERIOS_CALIDAD.includes(k) && !porConcepto.has(k)) porConcepto.set(k, m);
+      }
       for (const c of criterios.filas) {
         const nombre = String(c.nombre || '').trim();
         if (!nombre) continue;
-        const r = await cliente.query(
-          `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden, criterio)
-           VALUES ($1,'puntos','mayor',NULL,2,FALSE,'',50,TRUE)
-           ON CONFLICT (nombre) DO UPDATE SET activa=TRUE, criterio=TRUE
-           RETURNING id`, [nombre]);
+        const k = claveIndicador(nombre);
+        const existente = k && CRITERIOS_CALIDAD.includes(k) ? porConcepto.get(k) : null;
+        const r = existente
+          ? { rows: [{ id: existente.id }] }
+          : await cliente.query(
+              `INSERT INTO metricas (nombre, unidad, direccion, meta, decimales, principal, consejo, orden, criterio)
+               VALUES ($1,'puntos','mayor',NULL,2,FALSE,'',50,TRUE)
+               ON CONFLICT (nombre) DO UPDATE SET activa=TRUE, criterio=TRUE
+               RETURNING id`, [nombre]);
         const mid = r.rows[0].id;
+        if (!existente && k && CRITERIOS_CALIDAD.includes(k)) porConcepto.set(k, { id: mid, nombre });
         for (const [texto, valor] of Object.entries(c.valores || {})) {
           const uid = deTexto[texto];
           if (!uid || valor === null || valor === undefined) continue;
@@ -1154,6 +1253,11 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
         }
       }
     }
+
+    /* 4e. Dejar los tres principales como corresponde. La planilla de este mes
+       puede haber traído una columna con otro nombre, o haber dejado un
+       criterio de calidad marcado: acá se endereza antes de cerrar. */
+    await repararIndicadores((texto, params) => cliente.query(texto, params));
 
     // 4b. congelar las metas vigentes en este periodo.
     // Si mañana cambia la meta general, este periodo conserva la que se le exigió.
@@ -1780,6 +1884,15 @@ const arrancar = async () => {
     process.exit(1);
   }
   await migrate();
+  /* Los tres indicadores principales se enderezan en cada arranque: si una
+     carga vieja dejó dos midiendo chats, o ninguno marcado, el equipo se
+     quedaría sin resultado sin que nadie se entere. */
+  try {
+    const r = await repararIndicadores();
+    if (r.principales.length || r.alDesglose.length || r.destildados.length) {
+      console.log('>> Indicadores enderezados:', JSON.stringify(r));
+    }
+  } catch (e) { console.warn('No pude revisar los indicadores:', e.message); }
 
   // Si no hay ningún usuario, se crea el supervisor inicial.
   const { rows } = await q('SELECT count(*)::int AS n FROM usuarios');

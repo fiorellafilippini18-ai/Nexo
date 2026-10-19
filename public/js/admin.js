@@ -506,7 +506,7 @@ async function cargarEquipo() {
          respuesta— así que puedo dejarlos marcados yo: de cada concepto queda el que más datos
          tiene, y los criterios de calidad se van al desglose. No se borra ningún número.
          ${puede(YO, 'indicadores')
-            ? '<div style="margin-top:12px"><button class="btn sm primary" id="btnReparar">Dejar los 3 indicadores como corresponde</button></div>'
+            ? '<div style="margin-top:12px"><button class="btn sm primary btnReparar">Dejar los 3 indicadores como corresponde</button></div>'
             : ''}
        </div>`
     : '';
@@ -554,15 +554,26 @@ async function cargarEquipo() {
   activarReparar(() => cargarEquipo());
 }
 
-/** El botón que deja los tres indicadores principales como corresponde. */
+/* El botón que deja los tres indicadores principales como corresponde.
+   Aparece en dos lugares —en Equipo y en Indicadores—, así que se engancha por
+   clase y no por id: con un id repetido se enganchaba siempre el primero del
+   documento, que está en la pantalla que no se está mirando, y el botón visible
+   no hacía nada. */
 function activarReparar(despues) {
-  const b = $('#btnReparar'); if (!b) return;
+  for (const b of document.querySelectorAll('.btnReparar:not([data-listo])')) {
+    b.dataset.listo = '1';
+    engancharReparar(b, despues);
+  }
+}
+
+function engancharReparar(b, despues) {
   b.addEventListener('click', async () => {
     b.disabled = true; b.textContent = 'Revisando…';
     try {
       const r = await api('/api/metricas/reparar', { method: 'POST' });
       const partes = [];
       if (r.principales.length) partes.push(`principales: ${r.principales.join(', ')}`);
+      if ((r.unidos || []).length) partes.push(`unidos: ${r.unidos.join(' · ')}`);
       if (r.alDesglose.length) partes.push(`al desglose: ${r.alDesglose.join(', ')}`);
       if (r.destildados.length) partes.push(`ya no principales: ${r.destildados.join(', ')}`);
       toast(partes.length ? '✓ ' + partes.join(' · ') : 'Ya estaban bien');
@@ -1300,7 +1311,7 @@ function avisoPrincipalesFijos(principales) {
       : `<div class="sub" style="margin-top:9px">Falta${falta.length === 1 ? '' : 'n'}: <b>${falta.join('</b>, <b>')}</b>.
            Puedo dejarlos marcados: de cada concepto queda el que más datos tiene, y los criterios de calidad
            se van al desglose. No se borra ningún número.</div>
-         <div style="margin-top:11px"><button class="btn sm primary" id="btnReparar">Dejar los 3 indicadores como corresponde</button></div>`}
+         <div style="margin-top:11px"><button class="btn sm primary btnReparar">Dejar los 3 indicadores como corresponde</button></div>`}
   </div>`;
 }
 

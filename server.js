@@ -888,6 +888,11 @@ function delMismoConcepto(metricas, titulo) {
 
 const RE_SUBMUESTRA = /(evaluad|muestra|detalle|parcial|subtotal|de la muestra)/i;
 
+/* La hoja "Escala de Plus" trae los tres indicadores otra vez, pero convertidos
+   en un ✓/✗ ("① Chats (≥800)"). Es el resultado, no la medición: no puede ser
+   el indicador principal ni mezclarse con los chats de verdad. */
+const RE_BANDERA = /^\s*[①②③④⑤⑥⑦⑧⑨⑩]/;
+
 /* Los siete criterios con los que se puntúa cada conversación. Son el desglose
    de la calidad: nunca definen el plus, por más que la planilla los traiga
    como una columna más al lado de los tres indicadores. */
@@ -904,17 +909,47 @@ const META_PRINCIPAL = { chats: 1200, calidad: 7, tiempo: 35 };
  * destildar una casilla para que un periodo entero quede sin nada que evaluar.
  * Así que no se confía en que la marca sobreviva: se recalcula.
  *
- *  · De cada concepto queda uno solo como principal: el que tiene más datos
- *    cargados. Los demás dejan de serlo, pero no se borra ningún número.
+ *  · De cada concepto queda uno solo: el que tiene más datos cargados. Los
+ *    repetidos no se destildan y listo —eso dejaba al periodo que colgaba del
+ *    repetido sin nada que evaluar—, sino que se vuelcan adentro del elegido.
+ *    No se borra ningún número: se mueven de indicador.
  *  · Los criterios de calidad pasan al desglose, nunca a principal.
  *
  * Corre al arrancar y después de cada carga, y también se puede pedir a mano.
  */
 async function repararIndicadores(ejecutar = q) {
-  const metricas = await all(
+  const metricas = (await ejecutar(
     `SELECT m.*, (SELECT count(*) FROM resultados r WHERE r.metrica_id = m.id)::int AS usos
-       FROM metricas m WHERE m.activa`);
-  const hecho = { principales: [], alDesglose: [], destildados: [] };
+       FROM metricas m WHERE m.activa`)).rows;
+  const hecho = { principales: [], alDesglose: [], destildados: [], unidos: [] };
+
+  /* Vuelca un indicador repetido adentro del que queda.
+     Solo se mueve lo que no pisa un valor ya cargado en el destino; si algo
+     queda sin poder moverse, el repetido sigue existiendo y solo se destilda,
+     porque perder un número es peor que mostrar una fila de más. */
+  async function unirEn(origen, destino) {
+    const movidos = (await ejecutar(
+      `UPDATE resultados r SET metrica_id=$2
+        WHERE r.metrica_id=$1
+          AND NOT EXISTS (SELECT 1 FROM resultados d
+                           WHERE d.periodo_id=r.periodo_id AND d.usuario_id=r.usuario_id
+                             AND d.metrica_id=$2)`, [origen, destino])).rowCount;
+    if (!movidos) return 0;
+    const quedan = Number((await ejecutar(
+      'SELECT count(*)::int AS n FROM resultados WHERE metrica_id=$1', [origen])).rows[0].n);
+    if (quedan) return movidos;
+    // Ya no le queda nada: se lleva sus metas donde el destino no tenga una propia y se retira.
+    await ejecutar(`INSERT INTO metas_periodo (periodo_id, metrica_id, meta)
+                    SELECT periodo_id, $2, meta FROM metas_periodo WHERE metrica_id=$1
+                    ON CONFLICT (periodo_id, metrica_id) DO NOTHING`, [origen, destino]);
+    await ejecutar(`INSERT INTO metas_persona (usuario_id, metrica_id, meta)
+                    SELECT usuario_id, $2, meta FROM metas_persona WHERE metrica_id=$1
+                    ON CONFLICT (usuario_id, metrica_id) DO NOTHING`, [origen, destino]);
+    await ejecutar('DELETE FROM metas_periodo WHERE metrica_id=$1', [origen]);
+    await ejecutar('DELETE FROM metas_persona WHERE metrica_id=$1', [origen]);
+    await ejecutar('UPDATE metricas SET activa=FALSE, principal=FALSE, criterio=FALSE WHERE id=$1', [origen]);
+    return movidos;
+  }
 
   // 1. Un criterio de calidad va al desglose, pase lo que pase.
   for (const m of metricas) {
@@ -929,7 +964,8 @@ async function repararIndicadores(ejecutar = q) {
   // 2. Un solo principal por concepto: el que más datos tiene cargados.
   for (const concepto of CONCEPTOS_PRINCIPALES) {
     const candidatos = metricas
-      .filter((m) => claveIndicador(m.nombre) === concepto && !RE_SUBMUESTRA.test(m.nombre))
+      .filter((m) => claveIndicador(m.nombre) === concepto
+                  && !RE_SUBMUESTRA.test(m.nombre) && !RE_BANDERA.test(m.nombre))
       .sort((a, b) => (b.usos - a.usos) || (Number(b.principal) - Number(a.principal)) || (a.id - b.id));
     if (!candidatos.length) continue;
 
@@ -943,6 +979,8 @@ async function repararIndicadores(ejecutar = q) {
       await ejecutar('UPDATE metricas SET meta=$2 WHERE id=$1', [elegido.id, META_PRINCIPAL[concepto]]);
     }
     for (const otro of candidatos.slice(1)) {
+      const movidos = await unirEn(otro.id, elegido.id);
+      if (movidos) hecho.unidos.push(`${otro.nombre} → ${elegido.nombre}`);
       if (!otro.principal) continue;
       await ejecutar('UPDATE metricas SET principal=FALSE WHERE id=$1', [otro.id]);
       hecho.destildados.push(otro.nombre);
@@ -958,7 +996,10 @@ async function repararIndicadores(ejecutar = q) {
       .filter((m) => claveIndicador(m.nombre) === concepto)
       .sort((a, b) => (b.usos - a.usos) || (Number(b.criterio) - Number(a.criterio)) || (a.id - b.id));
     if (candidatos.length < 2) continue;
+    const queda = candidatos[0];
     for (const otro of candidatos.slice(1)) {
+      const movidos = await unirEn(otro.id, queda.id);
+      if (movidos) hecho.unidos.push(`${otro.nombre} → ${queda.nombre}`);
       if (!otro.criterio) continue;
       await ejecutar('UPDATE metricas SET criterio=FALSE WHERE id=$1', [otro.id]);
       hecho.fueraDelDesglose = (hecho.fueraDelDesglose || []).concat(otro.nombre);
@@ -1889,7 +1930,7 @@ const arrancar = async () => {
      quedaría sin resultado sin que nadie se entere. */
   try {
     const r = await repararIndicadores();
-    if (r.principales.length || r.alDesglose.length || r.destildados.length) {
+    if (r.principales.length || r.alDesglose.length || r.destildados.length || r.unidos.length) {
       console.log('>> Indicadores enderezados:', JSON.stringify(r));
     }
   } catch (e) { console.warn('No pude revisar los indicadores:', e.message); }

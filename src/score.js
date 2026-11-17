@@ -60,16 +60,26 @@ export function destacados(metricas, personas) {
   const puntuados = personas.map((p) => {
     const ev = evaluar(metricas, p.valores, promedios, p);
     const avs = ev.detalle.filter((d) => d.principal && d.avance !== null && !d.exento).map((d) => d.avance);
+    /* Cuántos cumplió de verdad: si la planilla lo declara, vale eso. A la
+       supervisión la miden otros indicadores, y sin esto terminaba coronada
+       "mejor asesora" justo el mes en que la planilla dice que no cumplió. */
+    const dec = p.declarado && p.declarado.total > 0 ? p.declarado : null;
+    const cumplidos = dec ? dec.cumplidos : ev.cumplidos;
+    const total = dec ? dec.total : ev.total;
     return {
-      p, cumplidos: ev.cumplidos, total: ev.total,
+      p, cumplidos, total,
       prom: avs.length ? avs.reduce((a, b) => a + b, 0) / avs.length : 0,
       mvps: porIndicador.filter((x) => x.usuarioId === p.id).length
     };
   }).filter((x) => x.total > 0);
 
   if (puntuados.length > 1) {
-    puntuados.sort((a, b) => (b.mvps - a.mvps) || (b.cumplidos - a.cumplidos) || (b.prom - a.prom));
-    const g = puntuados[0];
+    /* El mejor del periodo sale de entre los que mejor resultado sacaron.
+       Ganar dos indicadores sueltos no alcanza si otro cumplió todo. */
+    const techo = Math.max(...puntuados.map((x) => x.cumplidos / x.total));
+    const candidatos = puntuados.filter((x) => x.cumplidos / x.total >= techo);
+    candidatos.sort((a, b) => (b.mvps - a.mvps) || (b.cumplidos - a.cumplidos) || (b.prom - a.prom));
+    const g = candidatos[0];
     // tiene que haber ganado al menos un indicador principal
     if (g.mvps > 0) {
       general = {

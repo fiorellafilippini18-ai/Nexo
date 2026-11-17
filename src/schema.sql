@@ -277,3 +277,34 @@ BEGIN
     INSERT INTO config (clave, valor) VALUES ('criterio_migrado', '1');
   END IF;
 END $$;
+
+/* El resultado que declara la propia planilla.
+   No todos se miden con los mismos tres indicadores: a la supervisión la
+   define el cumplimiento del equipo y el cierre en 24 horas, no el tiempo de
+   respuesta. La planilla ya trae esa cuenta hecha y explicada; cuando la trae,
+   manda la planilla y Nexo deja de recalcular por su cuenta. */
+CREATE TABLE IF NOT EXISTS resultado_planilla (
+  periodo_id INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  nivel      TEXT,
+  cumplidos  INTEGER,
+  total      INTEGER,
+  plus       BIGINT,
+  texto      TEXT,
+  fuente     TEXT NOT NULL DEFAULT 'tabla',
+  PRIMARY KEY (periodo_id, usuario_id)
+);
+
+/* El plus ajustado a mano.
+   Siempre hay un mes en que el monto se decide por fuera de la cuenta: un
+   acuerdo, una licencia, un ajuste de Gerencia. Pisa todo lo demás, queda
+   firmado y se puede sacar para volver al número calculado. */
+CREATE TABLE IF NOT EXISTS plus_manual (
+  periodo_id INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  monto      BIGINT NOT NULL,
+  nota       TEXT,
+  quien_id   INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  cuando     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (periodo_id, usuario_id)
+);

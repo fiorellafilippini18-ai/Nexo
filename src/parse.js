@@ -887,6 +887,128 @@ const conComa = (n) => {
   return s.replace('.', ',');
 };
 
+/* =============================================================
+   El resultado que la propia planilla declara
+   =============================================================
+   La planilla no solo trae números: también dice, con todas las letras,
+   cuántos indicadores cumplió cada quien y cuánto le toca de plus. Y a veces
+   no coincide con lo que daría la cuenta de Nexo, porque el cargo se mide con
+   otros indicadores: a la supervisión no la define el tiempo de respuesta sino
+   el cumplimiento del equipo y el cierre en 24 horas. Cuando la planilla lo
+   dice, mandar la planilla. */
+
+const NIVELES = ['EXCELENTE', 'BUENO', 'MALO', 'CRÍTICO'];
+const RE_NIVEL = /\b(EXCELENTE|BUENO|MALO|CR[IÍ]TICO)\b/i;
+const RE_CUANTOS = /(\d+)\s*(?:de|\/)\s*(\d+)/g;
+const RE_GUARANIES = /Gs\.?\s*([\d][\d.  ]*)/gi;
+
+/* Una frase cuenta como "el resultado" solo si se presenta como tal. Sin esto
+   entra cualquier cosa: la tabla de la escala ("3 de 3 = Gs. 800.000 · 2 de 3
+   = …") o un valor suelto ("4 de 4 (100%); 0 en Crítico"). */
+const RE_DECLARA = /^\s*(resultado|plus del mes)\s*:|(\d+)\s*(?:de|\/)\s*(\d+)\s*indicadores?\s*cumplid/i;
+
+const nivelDe = (s) => {
+  const m = String(s).match(RE_NIVEL);
+  if (!m) return null;
+  const n = normTxt(m[1]).toUpperCase();
+  return NIVELES.find((x) => normTxt(x).toUpperCase() === n) || null;
+};
+
+/** "400.000" / "1 200 000" → 400000 / 1200000. */
+const guaranies = (s) => {
+  const n = Number(String(s).replace(/[.  ]/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Saca de una frase el nivel, el "n de m" y el monto, si están. */
+function leerFrase(texto) {
+  const s = String(texto || '');
+  /* Los indicadores se cuentan con los dedos de una mano: "2 de 3" es el
+     resultado, "106 de 107" es un porcentaje de chats que vino en la misma
+     frase. Y si quedan varios candidatos chicos, es la tabla de la escala
+     ("3 de 3 = Gs. 800.000 · 2 de 3 = …"), que no habla de nadie en particular. */
+  const cuantos = [...s.matchAll(RE_CUANTOS)]
+    .filter((c) => Number(c[2]) > 0 && Number(c[2]) <= 12 && Number(c[1]) <= Number(c[2]));
+  if (cuantos.length !== 1) return null;
+  const cumplidos = Number(cuantos[0][1]);
+  const total = Number(cuantos[0][2]);
+  const montos = [...s.matchAll(RE_GUARANIES)];
+  return {
+    nivel: nivelDe(s), cumplidos, total,
+    plus: montos.length === 1 ? guaranies(montos[0][1]) : null,
+    texto: s.replace(/\s+/g, ' ').trim().slice(0, 400)
+  };
+}
+
+/**
+ * El resultado declarado por la planilla, persona por persona.
+ *
+ * Se busca en dos lugares, y el segundo pisa al primero porque es más propio:
+ *  1. La tabla del equipo (la "Escala de Plus"): una fila por persona y una
+ *     columna "Resultado" con algo como "EXCELENTE (3/3) — Plus total".
+ *  2. La hoja de esa persona: la línea que arranca con "RESULTADO:" o
+ *     "PLUS DEL MES:", que es donde se explica el caso del cargo.
+ *
+ * @returns {Array} [{ usuarioId, persona, nivel, cumplidos, total, plus, texto, fuente }]
+ */
+export function leerResultados(buffer, conocidas = []) {
+  const indice = indicePersonas(conocidas);
+  if (!indice.size) return [];
+  const wb = XLSX.read(buffer, { type: 'buffer' });
+  const porPersona = new Map();
+
+  const guardar = (persona, dato, fuente) => {
+    if (!persona || !dato) return;
+    const previo = porPersona.get(persona.id);
+    // la hoja propia gana; entre dos iguales, la primera
+    if (previo && !(fuente === 'hoja' && previo.fuente !== 'hoja')) return;
+    porPersona.set(persona.id, {
+      usuarioId: persona.id ?? null, persona: persona.nombre, ...dato, fuente
+    });
+  };
+
+  for (const nombreHoja of wb.SheetNames) {
+    const ws = wb.Sheets[nombreHoja]; if (!ws) continue;
+    const m = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: true, defval: null, raw: false });
+    const dueño = personaDeHoja(nombreHoja, indice);
+
+    // --- 1. tabla del equipo: fila de encabezado con "Agente" y "Resultado"
+    for (let i = 0; i < m.length; i++) {
+      const fila = (m[i] || []).map((c) => (c === null ? '' : String(c).trim()));
+      const colNombre = fila.findIndex((c) => c && RE_NOMBRE_COL.test(c));
+      const colRes = fila.findIndex((c) => c && /resultado/i.test(c));
+      /* Una planilla pone "EXCELENTE (3/3)" en una sola celda y otra lo parte en
+         dos columnas: "Indicadores Cumplidos" = "3 / 3" y "RESULTADO Y PLUS" =
+         "EXCELENTE — …". Se leen juntas. */
+      const colCump = fila.findIndex((c) => c && /cumplid/i.test(c));
+      if (colNombre < 0 || (colRes < 0 && colCump < 0)) continue;
+      if (colNombre === colRes || colNombre === colCump) continue;
+      for (let j = i + 1; j < m.length; j++) {
+        const f = (m[j] || []).map((c) => (c === null ? '' : String(c).trim()));
+        if (!f.some((c) => c)) break;
+        const quien = indice.get(normTxt(f[colNombre] || ''));
+        if (!quien) continue;
+        const d = leerFrase([colRes >= 0 ? f[colRes] : '', colCump >= 0 ? f[colCump] : '']
+          .filter(Boolean).join(' · '));
+        if (d && (d.nivel || d.total)) guardar(quien, d, 'tabla');
+      }
+    }
+
+    // --- 2. hoja propia: la línea que declara el resultado
+    if (!dueño) continue;
+    for (const fila of m) {
+      const encontrado = (fila || [])
+        .map((c) => (c === null ? '' : String(c)))
+        .filter((s) => RE_DECLARA.test(s))
+        .map(leerFrase)
+        .find(Boolean);
+      if (encontrado) { guardar(dueño, encontrado, 'hoja'); break; }
+    }
+  }
+
+  return [...porPersona.values()];
+}
+
 /**
  * A partir del desglose de calidad (lo que devuelve leerCriterios), arma para
  * cada persona una línea con sus criterios más altos y otra con los más bajos.

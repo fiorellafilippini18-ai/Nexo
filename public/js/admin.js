@@ -543,15 +543,74 @@ async function cargarEquipo() {
         const suya = det.meta_de_persona ? ` title="Meta propia de ${esc(f.nombre)}: ${nfmt(det.meta, m.decimales)}"` : '';
         return `<td class="num"${suya}>${nfmt(det.valor, m.decimales)} ${marca}</td>`;
       }).join('')}
-      <td class="num"><b>${f.cumplidos}/${f.total}</b></td>
+      <td class="num"><b>${f.cumplidos}/${f.total}</b>${marcaFuente(f)}</td>
       <td>${f.nivel ? `<span class="pill ${f.nivel.color}">${esc(f.nivel.clave)}</span>` : '—'}</td>
-      <td class="num">${f.plus === null || f.plus === undefined ? '—' : (f.plus > 0 ? `<b>${gs(f.plus)}</b>` : 'sin plus')}</td>
+      <td class="num">${celdaPlus(f)}</td>
       <td style="text-align:right"><a class="btn sm" href="/mi-panel?ver=${f.id}"
            title="Ver su panel tal como lo ve esa persona">👁 Ver panel</a></td>
-    </tr>`).join('')}</tbody></table>`
+    </tr>`).join('')}</tbody></table>
+    ${puede(YO, 'indicadores') ? `<p class="sub" style="margin-top:12px">
+       📄 El resultado sale de la planilla del periodo, que puede medir a alguien con los
+       indicadores de su cargo y no con estos tres. ·
+       Para cambiar un monto, tocá el número en <b>Plus</b>: queda marcado con ✎ y se puede
+       deshacer para volver al calculado.</p>` : ''}`
     : '<div class="vacio">No hay datos cargados en este periodo.</div>';
 
   activarReparar(() => cargarEquipo());
+  activarPlusManual();
+}
+
+/* De dónde salió el "2 de 3": de la cuenta de Nexo o de lo que dice la
+   planilla. Cuando no coinciden hay que poder ver cuál se está mostrando sin
+   tener que preguntar. */
+function marcaFuente(f) {
+  if (f.fuente !== 'planilla') return '';
+  const por = f.dicePlanilla ? `\n\n«${f.dicePlanilla}»` : '';
+  return ` <span class="marca-planilla" title="Lo dice la planilla del periodo, no la cuenta de Nexo.${esc(por)}">📄</span>`;
+}
+
+function celdaPlus(f) {
+  if (f.plus === null || f.plus === undefined) return '—';
+  const texto = f.plus > 0 ? `<b>${gs(f.plus)}</b>` : 'sin plus';
+  const manual = f.fuentePlus === 'manual'
+    ? ` <span class="marca-manual" title="Ajustado a mano${f.notaManual ? ': ' + esc(f.notaManual) : ''}">✎</span>` : '';
+  if (!puede(YO, 'indicadores')) return texto + manual;
+  return `<button class="plusEditar" data-u="${f.id}" data-monto="${f.plus}"
+            data-nombre="${esc(f.nombre)}" data-manual="${f.fuentePlus === 'manual' ? 1 : 0}"
+            title="Tocar para ajustar el monto a mano">${texto}${manual}</button>`;
+}
+
+/* Ajustar el monto de una persona en un periodo. Siempre hay un mes en que el
+   número se decide por fuera de la cuenta; esto lo deja anotado en vez de
+   obligar a forzar los indicadores para que dé lo que tiene que dar. */
+function activarPlusManual() {
+  for (const b of $$('#eqTabla .plusEditar')) {
+    b.addEventListener('click', async () => {
+      const id = Number(b.dataset.u);
+      const periodoId = Number($('#eqPeriodo').value);
+      const actual = Number(b.dataset.monto) || 0;
+      const esManual = b.dataset.manual === '1';
+      const puesto = prompt(
+        `Plus de ${b.dataset.nombre} en este periodo (en guaraníes).\n` +
+        (esManual ? 'Está ajustado a mano. Dejalo vacío para volver al monto calculado.'
+                  : 'Sale del cálculo. Poné otro número para fijarlo a mano.'),
+        String(actual));
+      if (puesto === null) return;
+      try {
+        if (puesto.trim() === '') {
+          await api(`/api/plus-manual/${periodoId}/${id}`, { method: 'DELETE' });
+          toast('Vuelve al monto calculado');
+        } else {
+          const monto = Number(String(puesto).replace(/[^\d]/g, ''));
+          if (!Number.isFinite(monto)) return toast('Ese monto no se entiende', true);
+          const nota = prompt('¿Por qué? (opcional, queda anotado)', '') || '';
+          await api(`/api/plus-manual/${periodoId}/${id}`, { method: 'PUT', body: { monto, nota } });
+          toast('Monto ajustado');
+        }
+        await cargarEquipo();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
 }
 
 /* El botón que deja los tres indicadores principales como corresponde.

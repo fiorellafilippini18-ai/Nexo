@@ -249,11 +249,19 @@ function pintar() {
         ? esc(n.plus)
         : (d.plus > 0 ? `Te corresponde un plus de <b>${gs(d.plus)}</b>` : 'Este periodo no te corresponde plus')}</div>
       <div class="desc">${esc(n.desc)} Cumpliste <b>${d.cumplidos} de ${d.total}</b> indicadores principales.</div>
+      ${d.fuente === 'planilla' && d.dicePlanilla
+        ? `<div class="desc" style="margin-top:8px;opacity:.9">📄 Este resultado sale de la planilla del periodo,
+             que es la que manda: <i>«${esc(d.dicePlanilla)}»</i></div>` : ''}
+      ${d.fuentePlus === 'manual'
+        ? `<div class="desc" style="margin-top:8px;opacity:.9">✎ El monto lo ajustó Gerencia a mano${
+             d.notaManual ? ': <i>' + esc(d.notaManual) + '</i>' : '.'}</div>` : ''}
     </div>`;
   }
   if (principales.length) {
     html += `<div class="card"><h2>Tus indicadores principales</h2>
-      <p class="sub">Estos ${principales.length === 3 ? 'tres' : principales.length} definen si te corresponde el plus del periodo.</p>
+      <p class="sub">${d.fuente === 'planilla'
+        ? 'Son los tres indicadores generales. Tu resultado del periodo lo define la planilla, que puede medirte con los indicadores de tu cargo.'
+        : `Estos ${principales.length === 3 ? 'tres' : principales.length} definen si te corresponde el plus del periodo.`}</p>
       <div class="grid">${principales.map(tarjeta).join('')}</div></div>`;
   }
 

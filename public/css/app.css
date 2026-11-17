@@ -763,3 +763,12 @@ body.modo-preview .btn.primary, body.modo-preview .btn.danger{opacity:.5;pointer
 .an-lista li:last-child{margin-bottom:0}
 .tabla-analisis .an-lista{padding-left:16px;font-size:13.5px}
 .tabla-analisis .an-lista li{margin-bottom:5px}
+
+/* De dónde salió el número: la cuenta, la planilla o un ajuste a mano. */
+.marca-planilla, .marca-manual { font-size: .85em; opacity: .75; cursor: help; }
+.plusEditar {
+  background: none; border: 0; padding: 2px 6px; border-radius: 6px;
+  font: inherit; color: inherit; cursor: pointer;
+  border-bottom: 1px dashed var(--borde, #c9c9d4);
+}
+.plusEditar:hover { background: var(--fondo-2, rgba(0,0,0,.06)); border-bottom-color: var(--primario, #4b2fd6); }

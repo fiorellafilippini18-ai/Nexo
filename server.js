@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, q, one, all, migrate, norm } from './src/db.js';
 import { analizar, sugerir, claveIndicador, normTxt,
          detectarPeriodo, leerFortalezas, leerConclusiones, leerCriterios,
-        leerNarrativa, leerHojasPersona, resumenDeCriterios } from './src/parse.js';
+        leerNarrativa, leerHojasPersona, leerResultados, resumenDeCriterios } from './src/parse.js';
 import { evaluar, destacados, cumple, conMetaDe, metaPropia, ESCALA } from './src/score.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -341,6 +341,34 @@ app.put('/api/plus', pedirLogin, pedir('indicadores'), async (req, res) => {
   await q(`INSERT INTO config (clave, valor) VALUES ('plus_montos',$1)
            ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor`, [JSON.stringify(limpio)]);
   res.json(limpio);
+});
+
+/* --- El plus de una persona en un periodo, ajustado a mano ---------------
+   La tabla de montos de arriba vale para todos. Esto es lo otro: el mes
+   puntual en que el número se decide por fuera de la cuenta. Pisa al cálculo
+   y a la planilla, queda firmado, y se saca para volver al número calculado. */
+app.put('/api/plus-manual/:periodoId/:usuarioId', pedirLogin, pedir('indicadores'), async (req, res) => {
+  const periodoId = Number(req.params.periodoId);
+  const usuarioId = Number(req.params.usuarioId);
+  const monto = Number(req.body && req.body.monto);
+  if (!Number.isFinite(monto) || monto < 0) return res.status(400).json({ error: 'El monto no es válido' });
+  if (monto > 100000000) return res.status(400).json({ error: 'Ese monto parece un error de tipeo' });
+  const per = await one('SELECT id FROM periodos WHERE id=$1', [periodoId]);
+  const quien = await one('SELECT id FROM usuarios WHERE id=$1', [usuarioId]);
+  if (!per || !quien) return res.status(404).json({ error: 'No encuentro ese periodo o esa persona' });
+
+  await q(`INSERT INTO plus_manual (periodo_id, usuario_id, monto, nota, quien_id, cuando)
+           VALUES ($1,$2,$3,$4,$5,now())
+           ON CONFLICT (periodo_id, usuario_id) DO UPDATE SET
+             monto=EXCLUDED.monto, nota=EXCLUDED.nota, quien_id=EXCLUDED.quien_id, cuando=now()`,
+    [periodoId, usuarioId, Math.round(monto), String((req.body && req.body.nota) || '').slice(0, 300), req.uid]);
+  res.json({ ok: true, monto: Math.round(monto) });
+});
+
+app.delete('/api/plus-manual/:periodoId/:usuarioId', pedirLogin, pedir('indicadores'), async (req, res) => {
+  await q('DELETE FROM plus_manual WHERE periodo_id=$1 AND usuario_id=$2',
+    [Number(req.params.periodoId), Number(req.params.usuarioId)]);
+  res.json({ ok: true });
 });
 
 app.put('/api/marca', pedirLogin, pedir('marca'), async (req, res) => {
@@ -1126,7 +1154,7 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
   if (!h) return res.status(400).json({ error: 'No encuentro esa hoja en el archivo' });
 
   const cliente = await pool.connect();
-  let filas = 0, personasOk = 0, criteriosOk = 0, hojasOk = 0;
+  let filas = 0, personasOk = 0, criteriosOk = 0, hojasOk = 0, resultadosOk = 0;
   try {
     await cliente.query('BEGIN');
 
@@ -1254,6 +1282,23 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
       hojasOk++;
     }
 
+    /* 4e. El resultado que la planilla declara con todas las letras.
+       Es lo que destraba el caso de la supervisión: a Lucía no la define el
+       tiempo de respuesta sino el cierre en 24 horas, y eso Nexo no lo puede
+       deducir de los números. La planilla ya lo dice; se guarda tal cual. */
+    for (const r of leerResultados(buf0, equipo0)) {
+      const uid = idDe(r.persona, r.usuarioId);
+      if (!uid || !(r.total > 0)) continue;
+      await cliente.query(
+        `INSERT INTO resultado_planilla (periodo_id, usuario_id, nivel, cumplidos, total, plus, texto, fuente)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (periodo_id, usuario_id) DO UPDATE SET
+           nivel=EXCLUDED.nivel, cumplidos=EXCLUDED.cumplidos, total=EXCLUDED.total,
+           plus=EXCLUDED.plus, texto=EXCLUDED.texto, fuente=EXCLUDED.fuente`,
+        [periodoId, uid, r.nivel, r.cumplidos, r.total, r.plus, r.texto, r.fuente]);
+      resultadosOk++;
+    }
+
     // 4c. calidad por criterio: la tabla transpuesta del desglose.
     // Cada criterio entra como indicador secundario, así alimenta el
     // "Detalle por criterio" que cada persona ya tiene en su panel.
@@ -1327,7 +1372,7 @@ app.post('/api/importar', pedirLogin, pedir('cargar'), async (req, res) => {
   }
 
   delete req.session.pendiente;
-  res.json({ ok: true, valores: filas, personas: personasOk, criterios: criteriosOk, hojas: hojasOk });
+  res.json({ ok: true, valores: filas, personas: personasOk, criterios: criteriosOk, hojas: hojasOk, resultados: resultadosOk });
 });
 
 app.get('/api/periodos/:id/archivo', pedirLogin, pedirGestion, async (req, res) => {
@@ -1380,6 +1425,52 @@ const plusDe = (montos, rol, nivel) => {
   return monto === undefined ? null : Number(monto);
 };
 
+/* --- Qué manda cuando los números no coinciden ---------------------------
+   Tres cosas pueden decir cuánto cumplió alguien, y no siempre dicen lo mismo:
+     1. el ajuste que cargó Gerencia a mano, que manda sobre todo;
+     2. lo que declara la planilla, que sabe cosas que Nexo no —a la
+        supervisión la mide el cierre en 24 horas, no el tiempo de respuesta—;
+     3. la cuenta de Nexo sobre los tres indicadores principales.
+   Se resuelve siempre en ese orden, y queda dicho de dónde salió cada número
+   para que nadie tenga que adivinar por qué la pantalla dice lo que dice. */
+const nivelPorClave = (clave) => ESCALA.find((e) => e.clave === clave) || null;
+
+function resolverResultado(ev, declarado, manual, montos, rol) {
+  let { nivel, cumplidos, total } = ev;
+  let fuente = 'calculo';
+
+  if (declarado && declarado.total > 0) {
+    cumplidos = declarado.cumplidos;
+    total = declarado.total;
+    nivel = nivelPorClave(declarado.nivel)
+         || ESCALA.find((e) => cumplidos / total >= e.min)
+         || null;
+    fuente = 'planilla';
+  }
+
+  /* El monto sale de la planilla solo si la planilla lo dice con todas las
+     letras. Que el resultado venga de ahí no alcanza: la mayoría de las
+     planillas dicen "EXCELENTE (3/3)" y el monto lo pone la escala. */
+  const loDicePlanilla = declarado && declarado.plus !== null && declarado.plus !== undefined;
+  let plus = loDicePlanilla ? Number(declarado.plus) : plusDe(montos, rol, nivel);
+  let fuentePlus = loDicePlanilla ? 'planilla' : 'escala';
+
+  if (manual) { plus = Number(manual.monto); fuentePlus = 'manual'; }
+
+  return {
+    nivel, cumplidos, total, plus, fuente, fuentePlus,
+    ratio: total ? cumplidos / total : 0,
+    dicePlanilla: declarado ? declarado.texto : null,
+    notaManual: manual ? (manual.nota || '') : null
+  };
+}
+
+const porUsuarioId = (filas) => new Map(filas.map((r) => [r.usuario_id, r]));
+const declaradosDe = async (periodoId) => porUsuarioId(
+  await all('SELECT * FROM resultado_planilla WHERE periodo_id=$1', [periodoId]));
+const manualesDe = async (periodoId) => porUsuarioId(
+  await all('SELECT * FROM plus_manual WHERE periodo_id=$1', [periodoId]));
+
 async function datosPeriodo(periodoId) {
   const metricas = await metricasDe(periodoId);
   // Se incluye a quienes ya no están en el equipo: sus datos siguen contando
@@ -1402,6 +1493,10 @@ async function datosPeriodo(periodoId) {
     };
     porUsuario[f.usuario_id].valores[f.metrica_id] = Number(f.valor);
   }
+  // Lo que la planilla declara va pegado a la persona: así el podio y el
+  // palmarés miran el mismo resultado que la tabla del equipo.
+  const declarados = await declaradosDe(periodoId);
+  for (const u of Object.values(porUsuario)) u.declarado = declarados.get(u.id) || null;
   const promedios = {};
   for (const m of metricas) {
     const vs = filas.filter((f) => f.metrica_id === m.id).map((f) => Number(f.valor));
@@ -1457,11 +1552,14 @@ app.get('/api/mi-desempeno/:periodoId', pedirLogin, async (req, res) => {
      panel de otra persona valen las secciones que ve ELLA, no las mías. */
   const montos = await montosPlus();
   const ojos = await comoQuien(req);
-  const plus = veSeccion(ojos, per, 'plus')
-    ? plusDe(montos, persona ? persona.rol : 'agente', evalu.nivel) : null;
+  const declarados = await declaradosDe(per.id);
+  const manuales = await manualesDe(per.id);
+  const resuelto = resolverResultado(evalu, declarados.get(objetivo), manuales.get(objetivo),
+                                     montos, persona ? persona.rol : 'agente');
+  const plus = veSeccion(ojos, per, 'plus') ? resuelto.plus : null;
 
   res.json({
-    periodo: per, persona, escala: ESCALA, ...evalu,
+    periodo: per, persona, escala: ESCALA, ...evalu, ...resuelto,
     posicion, deCuantos: todos.length, plus,
     // Lo que esta persona no ve: así la pantalla saca esas entradas del menú
     ocultas: ojos.gestion ? [] : [...new Set([...ojos.ocultas,
@@ -1542,6 +1640,8 @@ app.get('/api/equipo/:periodoId', pedirLogin, async (req, res) => {
   }
   const { metricas, porUsuario, promedios } = await datosPeriodo(per.id);
   const montos = await montosPlus();
+  const declarados = await declaradosDe(per.id);
+  const manuales = await manualesDe(per.id);
   /* Mirando el panel de otra persona, la tabla tiene que verse como la ve ella:
      con sus secciones ocultas y sin los permisos de quien está mirando. */
   const ojos = await comoQuien(req);
@@ -1551,11 +1651,12 @@ app.get('/api/equipo/:periodoId', pedirLogin, async (req, res) => {
   const filas = Object.values(porUsuario)
     .map((u) => {
       const ev = evaluar(metricas, u.valores, promedios, u);
+      const r = resolverResultado(ev, declarados.get(u.id), manuales.get(u.id), montos, u.rol);
       /* Lo que cobra cada quien es suyo: en la tabla del equipo, cada persona
          ve su propio monto y nada más. La gerencia los ve todos. El monto ni
          siquiera sale del servidor, así que no hay forma de espiarlo. */
       const ajeno = !verTodo && u.id !== quienSoy;
-      return { ...u, ...ev, plus: (ajeno || !verPlus) ? null : plusDe(montos, u.rol, ev.nivel) };
+      return { ...u, ...ev, ...r, plus: (ajeno || !verPlus) ? null : r.plus };
     })
     .sort((a, b) => b.ratio - a.ratio);
   const resumen = {};
